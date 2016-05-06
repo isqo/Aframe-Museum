@@ -1,0 +1,19 @@
+{
+  "name": "Museum",
+  "version": "1.0",
+  "authors": [
+    "isqo <qouiqaismail@gmail.com>"
+  ],
+  "description": "study project",
+  "license": "MIT",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "jquery": "~2.2.3"
+  }
+}
