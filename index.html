@@ -4,66 +4,60 @@
     <meta charset="utf-8">
     <title>Hello, World! • A-Frame</title>
     <meta name="description" content="Hello, World! • A-Frame">
+	<script src="https://aframe.io/releases/0.2.0/aframe.min.js"></script>
   </head>
   <body>
     <a-scene>
+
 	  <a-assets>
 	    <a-mixin id="blue" material="color: blue"></a-mixin>
 		<a-mixin id="cylinder" geometry="primitive: cylinder;height:4.0;radius:1" rotation="0 90 0"></a-mixin>
 	  </a-assets>
-<!--  
-	  <a-sphere position="0 1.25 -1" radius="1.25" color="#EF2D5E"></a-sphere>
-      <a-cube position="-1 0.5 1" rotation="0 45 0" width="1" height="1" depth="1" color="#4CC3D9"></a-cube>
-      <a-cylinder position="1 0.75 1" radius="0.5" height="1.5" color="#FFC65D"></a-cylinder>
-	  <a-plane rotation="-90 0 0" width="4" height="4" color="#7BC8A4"></a-plane> 
-	   -->
-	   
+	
+	<!--  
 	  <a-sphere radius="0.2" ></a-sphere>
 	   <a-cylinder height="2.0" color="green"  radius="0.05" translate="0 1.0 0"></a-cylinder>
        <a-cylinder height="2.0" color="red"   radius="0.05" translate="0 1.0 0" rotation="0 0 -90"></a-cylinder>
        <a-cylinder height="2.0" color="blue" radius="0.05" translate="0 1.0 0" rotation="90 0 0"></a-cylinder>
       <a-sky color="#ECECEC"></a-sky>
+	-->
 	  
-		<a-entity position="0 12 25">
-		   <a-camera far="10000" 
-					 fov="80"
-					 near="0.01"
-		   ></a-camera>
-		</a-entity>
+	<a-entity position="5 13 22">
+	   <a-camera far="1000" 
+				 fov="80"
+				 near="0.01"
+				 id="camera"
+	   ></a-camera>
+	</a-entity>
 	  
 	  
-		  <a-entity id="laplateforme">
-			  <a-entity id="lespieds">
-				  <a-entity mixin="blue cylinder"></a-entity>
-				  <a-entity mixin="blue cylinder"></a-entity>
-				  <a-entity mixin="blue cylinder"></a-entity>
-				  <a-entity mixin="blue cylinder"></a-entity>
-			  </a-entity>  
-			  <a-entity id="ladalle"
-						geometry="primitive: plane;height:20;width:30" 
-						rotation="-90 0 0">
-			  </a-entity> 
-		  </a-entity>
-	  
-    </a-scene>
-	  <script>
-  var cynlinderHeight = document.querySelector('#cylinder').getAttribute('geometry').height;
-  var cynlinderRadius = document.querySelector('#cylinder').getAttribute('geometry').radius;
+  <a-entity id="laplateforme">
+	  <a-entity id="lespieds">
+		  <a-entity mixin="blue cylinder"></a-entity>
+		  <a-entity mixin="blue cylinder"></a-entity>
+		  <a-entity mixin="blue cylinder"></a-entity>
+		  <a-entity mixin="blue cylinder"></a-entity>
+	  </a-entity>  
+	  <a-entity id="ladalle" rotation="-90 0 0">
+	  </a-entity> 
+  </a-entity>
 
-  var ladalle = document.querySelector('#laplateforme #ladalle');
-  var height = ladalle.getAttribute('geometry').height;
-  var width =  ladalle.getAttribute('geometry').width;
-  ladalle.setAttribute('position', {x:0,y:cynlinderHeight/2,z:0});
-  
-  var lespieds = document.querySelector('#laplateforme #lespieds');
-  lespieds.children[0].setAttribute('position', {x:(width/2)- cynlinderRadius,y:0,z:(height/2) - cynlinderRadius});
-  lespieds.children[1].setAttribute('position', {x:(width/2)- cynlinderRadius,y:0,z:(-height/2)+ cynlinderRadius});
-  lespieds.children[2].setAttribute('position', {x:(-width/2)+ cynlinderRadius,y:0,z:(height/2)- cynlinderRadius});
-  lespieds.children[3].setAttribute('position', {x:(-width/2)+ cynlinderRadius,y:0,z:(-height/2)+ cynlinderRadius});
-  </script>
-  <script src="https://aframe.io/releases/0.2.0/aframe.min.js"></script>
+  <a-entity id="murs">
+	  <a-entity rotation="0 0 0"> </a-entity> 
+      <a-entity rotation="0 90 0"></a-entity> 
+      <a-entity rotation="0 -90 0"></a-entity>
+  </a-entity>
+
+ <a-entity id="plafond" rotation="-90 0 0"> </a-entity> 
+
+ <a-entity id="deuxiemeetage" rotation="-90 0 0"> </a-entity> 
+
+    </a-scene>
   <!-- bower:js -->
   <script src="bower_components/jquery/dist/jquery.js"></script>
   <!-- endbower --> 
+<!-- grunt:js -->
+ <script src="js/main.js"></script>
+ <!-- endgrunt -->
   </body>
 </html>
