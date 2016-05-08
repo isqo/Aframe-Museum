@@ -5,6 +5,7 @@
     <title>Hello, World! • A-Frame</title>
     <meta name="description" content="Hello, World! • A-Frame">
 	<script src="https://aframe.io/releases/0.2.0/aframe.min.js"></script>
+	<script src="js/bundle.js"></script>
   </head>
   <body>
     <a-scene>
@@ -21,8 +22,17 @@
        <a-cylinder height="2.0" color="blue" radius="0.05" translate="0 1.0 0" rotation="90 0 0"></a-cylinder>
       <a-sky color="#ECECEC"></a-sky>
 	-->
-	  
-	<a-entity position="5 13 22">
+
+<!-- 	<a-entity 
+		id="player"
+		camera
+	    universal-controls
+	    kinematic-body
+		jump-ability
+	    >
+	</a-entity> -->
+      
+	<a-entity position="5 4 5">
 	   <a-camera far="1000" 
 				 fov="80"
 				 near="0.01"
@@ -30,7 +40,7 @@
 	   ></a-camera>
 	</a-entity>
 	  
-	  
+
   <a-entity id="laplateforme">
 	  <a-entity id="lespieds">
 		  <a-entity mixin="blue cylinder"></a-entity>
@@ -45,12 +55,31 @@
   <a-entity id="murs">
 	  <a-entity rotation="0 0 0"> </a-entity> 
       <a-entity rotation="0 90 0"></a-entity> 
-      <a-entity rotation="0 -90 0"></a-entity>
+      <a-entity rotation="0 90 0"></a-entity>
+      <a-entity material="opacity: 0.5" rotation="0 0 0"></a-entity>
+      <a-entity material="opacity: 0.5" rotation="0 0 0"></a-entity>
+      <a-entity material="opacity: 0.5" rotation="0 0 0"></a-entity>
+      <a-entity rotation="0 0 0"></a-entity>
+      <a-entity material="opacity: 0.5" rotation="0 0 0"></a-entity>
+      <a-entity material="opacity: 0.5" rotation="0 0 0"></a-entity>
   </a-entity>
 
  <a-entity id="plafond" rotation="-90 0 0"> </a-entity> 
 
- <a-entity id="deuxiemeetage" rotation="-90 0 0"> </a-entity> 
+  <a-entity id="deuxiemeetage">
+	  <a-entity rotation="-90 0 0"> </a-entity> 
+      <a-entity rotation="-90 0 0"></a-entity> 
+  </a-entity>
+
+    <a-entity id="rooms">
+	    <a-entity id="room">
+		  <a-entity rotation="0 90 0"> </a-entity> 
+	      <a-entity rotation="0 0 0"></a-entity> 
+	      <a-entity rotation="0 0 0"></a-entity>
+	      <a-entity rotation="0 0 0"></a-entity>
+	      <a-entity rotation="0 90 0"></a-entity>
+	   </a-entity>
+  </a-entity>
 
     </a-scene>
   <!-- bower:js -->

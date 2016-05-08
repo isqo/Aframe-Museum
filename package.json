@@ -27,5 +27,8 @@
     "url": "git+https://bitbucket.org/isqo/a-frame-museum.git"
   },
   "author": "Ismail QOUIQA",
-  "homepage": "https://bitbucket.org/isqo/a-frame-museum#readme"
+  "homepage": "https://bitbucket.org/isqo/a-frame-museum#readme",
+  "dependencies": {
+    "aframe-extras": "^1.14.0"
+  }
 }
