@@ -18,11 +18,11 @@
   $("[x-rotation]").attr('rotation',objToStr({x:90,y:0,z:0}));
   $("[y-rotation]").attr('rotation',objToStr({x:0,y:90,z:0}));
   $("[no-rotation]").attr('rotation',objToStr({x:0,y:0,z:90}));
-  player.attr('position', objToStr({x:0,y:cynlinderHeight/2 + 5,z:0}));
+  player.attr('position', objToStr({x:0,y:cynlinderHeight/2 + 5,z:12}));
   var old_el = null;
   var old_z = 0;
   var old_y = 0;
-  
+
   function objToStr(object)
   {
     var output = "";
