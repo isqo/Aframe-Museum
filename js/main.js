@@ -40,31 +40,37 @@
     return output;
   }
 
-  AFRAME.registerComponent('collision-listener', {
+  AFRAME.registerComponent('collision-stairs-listener', {
   init: function () {
     var el = this.el;
     el.addEventListener('collide', function (event) {
-      var first_step = el.hasAttribute('first-step');$
-      if(old_el != el)
+      var first_step = el.hasAttribute('first-step');
+      if((old_el!=null && old_el.getAttribute("id") != el.getAttribute("id")) || old_el==null)
       {
-
         var x =player.attr('position').x;
         var y =player.attr('position').y;
         var z =player.attr('position').z;
-        var new_z=z;
+        var new_z=z - 0.2;
         var new_y=y + 1;
         if((z < old_z && y > old_y) || first_step){
-          console.log("first element collision");
           player.attr('position', objToStr({x:x,y:new_y,z:new_z}));
           old_el = el;
         }
         else {
           old_el = null;
         }
-
         old_z = new_z ;
         old_y = new_y ;
       }
 });
   }
+});
+
+AFRAME.registerComponent('collision-floor-listener', {
+init: function () {
+  var el = this.el;
+  el.addEventListener('collide', function (event) {
+   old_el = null;
+});
+}
 });
