@@ -5,4 +5,4 @@ window.$ = $;
 var extras = require('aframe-extras');
 extras.registerAll();
 
-require('aframe-physics-components');
+// require('aframe-physics-components');

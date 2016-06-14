@@ -11,133 +11,155 @@
     <a-scene physics>
     <!-- <a-scene> -->
 	  <a-assets>
-      <img id="sky" src="./img/sky.png">
-	    <a-mixin id="blue" material="color: blue"></a-mixin>
+      <!-- <frames> -->
+	    <a-mixin id="frame1" geometry="primitive: plane;width:2;height:2;" material="src: url(./Frames/1.jpg);"></a-mixin>
+	    <a-mixin id="frame2" geometry="primitive: plane;width:2;height:2;" material="src: url(./Frames/3.jpg);"></a-mixin>
+      <a-mixin id="frame3" geometry="primitive: plane;" material="src: url(./Frames/1.jpg);"></a-mixin>
+	    <a-mixin id="frame4" geometry="primitive: plane;" material="src: url(./Frames/3.jpg);"></a-mixin>
+	    <a-mixin id="frame5" geometry="primitive: plane;" material="src: url(./Frames/13.jpg);"></a-mixin>
+      <!-- <frames> -->
+      <!-- <Components> -->
+      <a-mixin id="back-plane" geometry="primitive: plane;" material="side: back"></a-mixin>
+      <a-mixin id="front-plane" geometry="primitive: plane;" material="side: front"></a-mixin>
+      <a-mixin id="box" geometry="primitive: box;" material="opacity:0;"></a-mixin>
+      <!-- <Components> -->
+      <!-- <textures> -->
+      <a-mixin id="iron" material="src: url(ground.jpg);repeat:20 20;"></a-mixin>
+      <a-mixin id="tiles" material="src: url(floor.jpg);repeat:10 10;"></a-mixin>
+      <a-mixin id="painting" material="src: url(walls.jpg);repeat:20 6;"></a-mixin>
+      <a-mixin id="bricks1" material="src: url(brick.jpg);repeat:1 1;"></a-mixin>
+      <a-mixin id="bricks2" material="src: url(brick-corner.jpg);repeat:1 1;"></a-mixin>
+      <a-mixin id="bricks3" material="src: url(brick-small.jpg);repeat:1 1;"></a-mixin>
+      <a-mixin id="bricks4" material="src: url(brick4.jpg);repeat:2 1;"></a-mixin>
+      <!-- <textures> -->
+
 		  <a-mixin id="cylinder" geometry="primitive: cylinder;height:4.0;radius:1" rotation="0 90 0"></a-mixin>
-      <a-mixin id="wall" material="src: url(walls.jpg);repeat:20 6;"></a-mixin>
       <a-mixin id="room-wall" material="src: url(walls.jpg);repeat:6 4;"></a-mixin>
       <a-mixin id="room-wall-small" material="src: url(walls.jpg);repeat:1 4;"></a-mixin>
       <a-mixin id="floor" material="src: url(floor.jpg);repeat:10 10;"></a-mixin>
       <a-mixin id="wood" material="src: url(wood.jpg);repeat:1 1;"></a-mixin>
 	    <a-mixin id="window" material="opacity: 0.8" scale="1 1 0.01"></a-mixin>
-	    <a-mixin id="frame" geometry="primitive: plane;" material=""></a-mixin>
-      <a-mixin id="brick" material="src: url(brick.jpg);repeat:1 1;"></a-mixin>
-      <a-mixin id="brick-corner" material="src: url(brick-corner.jpg);repeat:1 1;"></a-mixin>
-      <a-mixin id="brick-small" material="src: url(brick-small.jpg);repeat:1 1;"></a-mixin>
-      <a-mixin id="brick4" material="src: url(brick4.jpg);repeat:2 1;"></a-mixin>
-      <a-mixin id="ground" material="src: url(ground.jpg);repeat:20 20;"></a-mixin>
+
       <a-mixin id="roof" material="src: url(roof.jpg);repeat:20 20;"></a-mixin>
-      <a-mixin id="marble" material="src: url(floor.jpg);repeat:10 10;"></a-mixin>
       <a-mixin id="mezzanine-redtiles" material="src: url(stairs.jpg);repeat:80 40;"></a-mixin>
       <a-mixin id="mezzanine-roof" material="src: url(roof.jpg);repeat:20 10;"></a-mixin>
 	  </a-assets>
-   <a-sky src="#sky"></a-sky>
-<a-entity>
-  <a-entity
-		id="player"
-		camera
-    universal-controls
-    kinematic-body
-		jump-ability = "true"
-	    >
-	</a-entity>
- </a-entity>
 
+   <a-sky material="src: url(sky.jpg)" geometry="primitive:sphere;radius:5000;segmentsWidth:64;segmentsHeight:64" scale="-1 1 1"></a-sky>
 
-
-	<!-- <a-entity position="5 4 4">
-	   <a-camera far="10000"
-				 fov="80"
-				 near="0.01"
-				 id="camera"
-	   ></a-camera>
-	</a-entity> -->
+  <a-entity>
+    <a-entity
+  		id="player"
+  		camera
+      universal-controls
+      kinematic-body
+  		jump-ability = "true"
+  	    >
+  	</a-entity>
+  </a-entity>
 
 <a-entity id="museum">
+  <a-entity id="light" light="type: ambient; color: black;"></a-entity>
 
+  <!--PLATFORM-->
     <a-entity id="platform">
   	  <a-entity id="cylinders">
-  		  <a-entity mixin="ground cylinder" position="16.5 0 11.5"></a-entity>
-  		  <a-entity mixin="ground cylinder" position="16.5 0 -11.5"></a-entity>
-  		  <a-entity mixin="ground cylinder" position="-16.5 0 11.5"></a-entity>
-  		  <a-entity mixin="ground cylinder" position="-16.5 0 -11.5"></a-entity>
+  		  <a-entity mixin="iron cylinder" position="16.5 0 11.5"></a-entity>
+  		  <a-entity mixin="iron cylinder" position="16.5 0 -11.5"></a-entity>
+  		  <a-entity mixin="iron cylinder" position="-16.5 0 11.5"></a-entity>
+  		  <a-entity mixin="iron cylinder" position="-16.5 0 -11.5"></a-entity>
   	  </a-entity>
-      <a-entity class="floor" mixin="ground" static-body="" x-rotation="" rotation="90 0 0" geometry="primitive:box;height:25;width:35;" position="0 2 0" collision-floor-listener>
-        <a-entity geometry="primitive: plane; width:28;height:20" material="side: back" position="0 0 -0.51" mixin="marble"></a-entity>
+      <a-entity class="floor" mixin="iron" geometry="primitive:box;height:25;width:35;" rotation="90 0 0" position="0 2 0" static-body collision-floor-listener>
+        <a-entity mixin="back-plane tiles" geometry="width:28;height:20" position="0 0 -0.51"></a-entity>
       </a-entity>
     </a-entity>
+  <!--PLATFORM-->
+
 
   <a-entity id="building">
+  <!--SKELETON-->
     <a-entity id="skeleton">
-            <a-entity class="the-right-side-wall" y-rotation="" material="shader:standard;color:black;opacity:0" rotation="0 90 0" geometry="primitive:box;height:8;width:20;" position="14.5 5 0" static-body>
-              <a-entity geometry="primitive: plane; width:20;height:6" material="side: back" position="0 0 -0.51" mixin="wall">
-                <a-entity mixin="frame" geometry="width:2;height:2;" material="src: url(./Frames/1.jpg);" position="-8 0 -0.01" rotation="0 180 0"></a-entity>
-                <a-entity mixin="frame" geometry="width:2;height:2;" material="src: url(./Frames/2.jpg);" position="-5 0 -0.01"  rotation="0 180 0"></a-entity>
-                <a-entity mixin="frame" geometry="width:2;height:2;" material="src: url(./Frames/3.jpg);" position="-2 0 -0.01"  rotation="0 180 0"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/4.jpg);"position="1.5 2 -0.01" rotation="0 180 0"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/5.jpg);"position="3.5 2 -0.01" rotation="0 180 0"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/6.jpg);"position="5.5 2 -0.01" rotation="0 180 0"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/3.jpg);"position="7.5 2 -0.01" rotation="0 180 0"></a-entity>
-              </a-entity>
-
-            <a-entity geometry="primitive: plane; width:20;height:7;" material="side: front" position="0 0.5 0.5" mixin="brick"></a-entity>
-            <a-entity rotation="0 -90 0" geometry="primitive: plane; width:1;height:7" material="side: front" position="-10.0001 0.5 0" mixin="brick-corner"></a-entity>
-            </a-entity>
-            <a-entity id="the-left-side-wall" material="opacity:0;" y-rotation="" mixin="box-scale" rotation="0 90 0" geometry="primitive:box;height:6;width:20;" position="-14.5 5 0" static-body>
-              <a-entity geometry="primitive: plane; width:20;height:6" material="side: front" position="0 0 0.51" mixin="wall">
-                <a-entity mixin="frame" geometry="width:2;height:2;" material="src: url(./Frames/1.jpg);" position="-8 0 0.01"></a-entity>
-                <a-entity mixin="frame" geometry="width:2;height:2;" material="src: url(./Frames/2.jpg);" position="-5 0 0.01"></a-entity>
-                <a-entity mixin="frame" geometry="width:2;height:2;" material="src: url(./Frames/3.jpg);" position="-2 0 0.01"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/4.jpg);"position="2 -1 0.01"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/5.jpg);"position="4 -1 0.01"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/6.jpg);"position="6 -1 0.01"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/3.jpg);"position="8 -1 0.01"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/4.jpg);"position="1.5 2 0.01"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/5.jpg);"position="3.5 2 0.01"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/6.jpg);"position="5.5 2 0.01"></a-entity>
-                <a-entity mixin="frame" material="src: url(./Frames/3.jpg);"position="7.5 2 0.01"></a-entity>
-              </a-entity>
-                <a-entity geometry="primitive: plane; width:20;height:7" material="side: back" position="0 0.5 -0.5" mixin="brick"></a-entity>
-                <a-entity rotation="0 -90 0" geometry="primitive: plane; width:1;height:7" material="side: front" position="-10.0001 0.5 0" mixin="brick-corner"></a-entity>
-            </a-entity>
-            <a-entity id="the-back-wall" mixin="" material="opacity:0;" geometry="primitive:box;height:6;width:30;" position="0 5 -9.5" static-body>
-              <a-entity geometry="primitive: plane; width:30;height:6" material="side: front" position="0 0 0.5" mixin="wall"></a-entity>
-              <a-entity geometry="primitive: plane; width:30;height:7" material="side: back" position="0 0.5 -0.5" mixin="brick"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/6.jpg);" position="-12.5 -1 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/13.jpg);" position="-10.5 -1 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/7.jpeg);" position="-6.25 -1 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/4.jpg);" position="-4.25 -1 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/9.jpg);" position="-0.25 -1 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/10.jpg);" position="1.75 -1 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/1.jpg);" position="6 -1 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/2.jpg);" position="8 -1 0.51"></a-entity>
-
-              <a-entity mixin="frame" material="src: url(./Frames/6.jpg);" position="-12.5 2 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/13.jpg);" position="-9.5 2 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/4.jpg);" position="-6.5 2 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/7.jpeg);" position="-3.5 2 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/4.jpg);" position="-0.5 2 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/1.jpg);" position="2.5 2 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/9.jpg);" position="5.5 2 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/10.jpg);" position="8.5 2 0.51"></a-entity>
-              <a-entity mixin="frame" material="src: url(./Frames/1.jpg);" position="11.5 2 0.51"></a-entity>
-            </a-entity>
-            <a-entity id="the-front-wall">
-              <a-entity mixin="window" static-body="" geometry="primitive:box;height:6;width:12;" position="-9 5 10"></a-entity>
-              <a-entity id="door">
-                <a-entity mixin="box-scale brick-corner" static-body="" geometry="primitive:box;height:6;width:1.4999999999999996;" position="2.249999999999999 5 9.5"></a-entity>
-                <a-entity mixin="box-scale brick-small" static-body="" geometry="primitive:box;height:1.5;width:2.999999999999999;" position="0 7.25 9.5"></a-entity>
-                <a-entity mixin="box-scale brick-corner" static-body="" geometry="primitive:box;height:6;width:1.4999999999999996;" position="-2.249999999999999 5 9.5"></a-entity>
-              </a-entity>
-              <a-entity mixin="window" static-body="" geometry="primitive:box;height:6;width:12;" position="9 5 10"></a-entity>
-              <a-entity rotation="0 0 0" geometry="primitive: plane; width:28;height:1" material="side: front" position="0 8.5 10" mixin="brick4"></a-entity>
-            </a-entity>
-            <a-entity id="roof" x-rotation="" static-body="" rotation="90 0 0" geometry="primitive:box;height:20;width:30;" material="opacity:0;" position="0 8.5 0">
-              <a-entity geometry="primitive: plane; width:28;height:20" material="side: front" position="0 0 0.5" mixin="roof"></a-entity>
-              <a-entity geometry="primitive: plane; width:30;height:20" material="side: back" position="0 0 -0.5" mixin="brick"></a-entity>
-            </a-entity>
+      <a-entity class="the-right-side-wall" mixin="box" geometry="height:8;width:20;" rotation="0 90 0" position="14.5 5 0" static-body>
+        <a-entity mixin="back-plane painting" geometry="width:20;height:6" position="0 0 -0.51">
+          <a-entity mixin="frame1" material="side: back" position="-7 0 -0.01"></a-entity>
+          <a-entity mixin="frame2" material="side: back" position="-3 0 -0.01"></a-entity>
+          <a-entity mixin="frame3" material="side: back" position="2.5 2 -0.01"></a-entity>
+          <a-entity mixin="frame4" material="side: back" position="6.5 2 -0.01"></a-entity>
         </a-entity>
+        <a-entity mixin="bricks1 front-plane" geometry="width:20;height:7;" position="0 0.5 0.5">
+          <a-entity light="type: directional; color: #EEE; intensity: 0.2"></a-entity>
+        </a-entity>
+        <a-entity mixin="bricks2 front-plane" geometry="width:1;height:7" rotation="0 -90 0" position="-10.0001 0.5 0">
+        </a-entity>
+      </a-entity>
 
+      <a-entity id="the-left-side-wall" mixin="box" geometry="height:6;width:20;" rotation="0 90 0" position="-14.5 5 0" static-body>
+        <a-entity mixin="painting front-plane" geometry="width:20;height:6" position="0 0 0.51">
+          <a-entity mixin="frame1" position="-7 0 0.01"></a-entity>
+          <a-entity mixin="frame2" position="-3 0 0.01"></a-entity>
+          <a-entity mixin="frame3" position="3 -1 0.01"></a-entity>
+          <a-entity mixin="frame4" position="7 -1 0.01"></a-entity>
+          <a-entity mixin="frame5" position="2.5 2 0.01"></a-entity>
+          <a-entity mixin="frame3" position="6.5 2 0.01"></a-entity>
+        </a-entity>
+        <a-entity mixin="bricks1 back-plane" geometry="width:20;height:7" position="0 0.5 -0.5">
+          <a-entity light="type: directional; color: #EEE; intensity: 0.2"></a-entity>
+        </a-entity>
+        <a-entity mixin="bricks2 front-plane" geometry="width:1;height:7"  rotation="0 -90 0" position="-10.0001 0.5 0">
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="the-back-wall" mixin="box" geometry="height:6;width:30;" position="0 5 -9.5" static-body>
+        <a-entity mixin="painting front-plane" geometry="width:30;height:6" position="0 0 0.5">
+          <a-entity mixin="frame3" position="-12.5 -1 0.01"></a-entity>
+          <a-entity mixin="frame4" position="-10.5 -1 0.01"></a-entity>
+          <a-entity mixin="frame5" position="-6.25 -1 0.01"></a-entity>
+          <a-entity mixin="frame3" position="-4.25 -1 0.01"></a-entity>
+          <a-entity mixin="frame4" position="-0.25 -1 0.01"></a-entity>
+          <a-entity mixin="frame5" position="1.75 -1 0.01"></a-entity>
+          <a-entity mixin="frame3" position="6 -1 0.01"></a-entity>
+          <a-entity mixin="frame4" position="8 -1 0.01"></a-entity>
+          <a-entity mixin="frame5" position="-12.5 2 0.01"></a-entity>
+          <a-entity mixin="frame3" position="-6.5 2 0.01"></a-entity>
+          <a-entity mixin="frame4" position="-0.5 2 0.01"></a-entity>
+          <a-entity mixin="frame5" position="5.5 2 0.01"></a-entity>
+          <a-entity mixin="frame3" position="11.5 2 0.01"></a-entity>
+        </a-entity>
+        <a-entity mixin="bricks1 back-plane" geometry="width:30;height:7" position="0 0.5 -0.5">
+          <a-entity light="type: directional; color: #EEE; intensity: 0.2"></a-entity>
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="the-front-wall">
+        <a-entity id="the-front-wall-door">
+          <a-entity>
+            <a-entity class="left" mixin="window" geometry="primitive:box;height:6;width:3;" position="-1.51 5 9.5" static-body ></a-entity>
+            <a-entity class="right" mixin="window" geometry="primitive:box;height:6;width:3;" position="1.51 5 9.5" static-body ></a-entity>
+          </a-entity>
+          <a-entity>
+            <a-entity mixin="bricks2" geometry="primitive:box;height:6;width:1.4999999999999996;" position="2.249999999999999 5 9.5" static-body></a-entity>
+            <a-entity mixin="bricks3"  geometry="primitive:box;height:1.5;width:2.999999999999999;" position="0 7.25 9.5" static-body>
+              <a-entity light="type: point; intensity: 3.0; distance: 10; decay: 1" position="0 1 1"></a-entity>
+            </a-entity>
+            <a-entity mixin="bricks2" geometry="primitive:box;height:6;width:1.4999999999999996;" position="-2.249999999999999 5 9.5" static-body></a-entity>
+          </a-entity>
+        </a-entity>
+        <a-entity mixin="window" geometry="primitive:box;height:6;width:12;" position="9 5 10" static-body></a-entity>
+        <a-entity mixin="window" geometry="primitive:box;height:6;width:12;" position="-9 5 10" static-body></a-entity>
+        <a-entity mixin="bricks4 front-plane" geometry="width:28;height:1" position="0 8.5 10">
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="roof" mixin="box" geometry="height:20;width:30;" rotation="90 0 0" position="0 8.5 0" static-body>
+        <a-entity mixin="front-plane roof" geometry="width:28;height:20" position="0 0 0.5">
+          <a-entity light="type: directional; color: #EEE; intensity: 0.2"></a-entity>
+        </a-entity>
+        <a-entity mixin="back-plane bricks1" geometry="width:30;height:20" position="0 0 -0.5">
+          <a-entity light="type: directional; color: #EEE; intensity: 0.2"></a-entity>
+        </a-entity>
+      </a-entity>
+    </a-entity>
+    <!--SKELETON-->
     <a-entity>
       <a-entity id="mezzanine">
               <a-entity class="floor" material="opacity:0;" static-body="" x-rotation="" rotation="90 0 0" geometry="primitive:box;height:10;width:25.25;" position="-1.875 5 -5" scale="1 1 0.05">
@@ -167,16 +189,12 @@
               <a-entity class="room">
                 <a-entity class="the-side-wall" mixin="room-wall" y-rotation="" rotation="0 90 0" material="opacity:0;" geometry="primitive:box;height:3;width:10;" position="-8.3125 3.5 -5">
                   <a-entity geometry="primitive: plane; width:10;height:3" material="side: front" position="0 0 0.5" mixin="room-wall">
-                    <a-entity mixin="frame" material="src: url(./Frames/4.jpg);side: front"position="-3 0.5 0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/5.jpg);side: front"position="-1 0.5 0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/6.jpg);side: front"position="1 0.5 0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: front"position="3 0.5 0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: front"position="-1.5 0.5 0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: front"position="1.5 0.5 0.01"></a-entity>
                   </a-entity>
                   <a-entity geometry="primitive: plane; width:10;height:3" material="side: back" position="0 0 -0.5" mixin="room-wall">
-                    <a-entity mixin="frame" material="src: url(./Frames/4.jpg);side: back"position="-3 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/5.jpg);side: back"position="-1 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/6.jpg);side: back"position="1 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="3 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="-1.5 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="1.5 0.5 -0.01"></a-entity>
                   </a-entity>
                   <a-entity geometry="primitive: plane; width:1;height:3" material="side: back" position="-5 0 0" rotation="0 90 0" mixin="room-wall-small">
                     <a-entity mixin="frame" geometry="width:1.5;height:1.5" material="src: url(./Frames/1.jpg);side: back" position="0 0.5 -0.01"></a-entity>
@@ -192,16 +210,12 @@
               <a-entity class="room">
                 <a-entity class="the-side-wall" material="opacity:0;" y-rotation="" rotation="0 90 0" geometry="primitive:box;height:3;width:10;" position="-2.125 3.5 -5">
                   <a-entity geometry="primitive: plane; width:10;height:3" material="side: front" position="0 0 0.5" mixin="room-wall">
-                    <a-entity mixin="frame" material="src: url(./Frames/4.jpg);side: front"position="-3 0.5 0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/5.jpg);side: front"position="-1 0.5 0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/6.jpg);side: front"position="1 0.5 0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: front"position="3 0.5 0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: front"position="-1.5 0.5 0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: front"position="1.5 0.5 0.01"></a-entity>
                   </a-entity>
                   <a-entity geometry="primitive: plane; width:10;height:3" material="side: back" position="0 0 -0.5" mixin="room-wall">
-                    <a-entity mixin="frame" material="src: url(./Frames/4.jpg);side: back"position="-3 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/5.jpg);side: back"position="-1 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/6.jpg);side: back"position="1 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="3 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="-1.5 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="1.5 0.5 -0.01"></a-entity>
                   </a-entity>
                   <a-entity geometry="primitive: plane; width:1;height:3" material="side: back" position="-5 0 0" rotation="0 90 0" mixin="room-wall-small">
                     <a-entity mixin="frame" geometry="width:1.5;height:1.5" material="src: url(./Frames/13.jpg);side: back" position="0 0.5 -0.01"></a-entity>
@@ -217,19 +231,15 @@
               <a-entity class="room">
                 <a-entity class="the-side-wall" material="opacity:0;" y-rotation="" rotation="0 90 0" geometry="primitive:box;height:3;width:10;" position="4.0625 3.5 -5">
                   <a-entity geometry="primitive: plane; width:10;height:3" material="side: front" position="0 0 0.5" mixin="room-wall">
-                    <a-entity mixin="frame" material="src: url(./Frames/4.jpg);side: front"position="-3 0.5 0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/5.jpg);side: front"position="-1 0.5 0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/6.jpg);side: front"position="1 0.5 0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: front"position="3 0.5 0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: front"position="-1.5 0.5 0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: front"position="1.5 0.5 0.01"></a-entity>
                   </a-entity>
                   <a-entity geometry="primitive: plane; width:10;height:3" material="side: back" position="0 0 -0.5" mixin="room-wall">
-                    <a-entity mixin="frame" material="src: url(./Frames/4.jpg);side: back"position="-3 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/5.jpg);side: back"position="-1 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/6.jpg);side: back"position="1 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="3 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="-1.5 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="1.5 0.5 -0.01"></a-entity>
                   </a-entity>
                   <a-entity geometry="primitive: plane; width:1;height:3" material="side: back" position="-5 0 0" rotation="0 90 0" mixin="room-wall-small">
-                    <a-entity mixin="frame" geometry="width:1.5;height:1.5" material="src: url(./Frames/11.jpg);side: back" position="0 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" geometry="width:1.5;height:1.5" material="src: url(./Frames/3.jpg);side: back" position="0 0.5 -0.01"></a-entity>
                   </a-entity>
                 </a-entity>
                 <a-entity id="door">
@@ -240,22 +250,17 @@
                 <a-entity class="the-side-wall" material="opacity:0;"y-rotation="" rotation="0 90 0" geometry="primitive:box;height:3;width:10;" position="10.25 3.5 -5">
                   <a-entity geometry="primitive: plane; width:10;height:3" material="side: front" position="0 0 0.5" mixin="room-wall"></a-entity>
                   <a-entity geometry="primitive: plane; width:10;height:3" material="side: back" position="0 0 -0.5" mixin="room-wall">
-                    <a-entity mixin="frame" material="src: url(./Frames/4.jpg);side: back"position="-3 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/5.jpg);side: back"position="-1 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/6.jpg);side: back"position="1 0.5 -0.01"></a-entity>
-                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="3 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="-1.5 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" material="src: url(./Frames/3.jpg);side: back"position="1.5 0.5 -0.01"></a-entity>
                   </a-entity>
                   <a-entity geometry="primitive: plane; width:1;height:3" material="side: back" position="-5 0 0" rotation="0 90 0" mixin="room-wall-small">
-                    <a-entity mixin="frame" geometry="width:1.5;height:1.5" material="src: url(./Frames/12.jpg);side: back" position="0.6 0.5 -0.01"></a-entity>
+                    <a-entity mixin="frame" geometry="width:1.5;height:1.5" material="src: url(./Frames/3.jpg);side: back" position="0.6 0.5 -0.01"></a-entity>
                   </a-entity>
                 </a-entity>
               </a-entity>
 
             </a-entity>
       </a-entity>
-    </a-entity>
-
-    <a-entity id="hall">
     </a-entity>
   </a-entity>
 </a-entity>

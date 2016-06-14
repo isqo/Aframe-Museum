@@ -1,5 +1,3 @@
-
-
   var cynlinderHeight = $('#cylinder').attr('geometry').height;
   var cynlinderRadius = $('#cylinder').attr('geometry').radius;
   var OnCylenders = cynlinderHeight/2;
@@ -74,3 +72,92 @@ init: function () {
 });
 }
 });
+
+var lock = false;
+var playerEl = document.querySelector('[camera]');
+playerEl.addEventListener('collide', function (e) {
+  var el = e.detail.body.el;
+  if(el.parentNode.parentNode.getAttribute("id") == "the-front-wall-door")
+  {
+    if(!lock)
+    {
+      lock = true;
+      var myTimer = setInterval(function()
+      {
+        if(open($("#the-front-wall-door .left"),$("#the-front-wall-door .right"),4.51))
+        {
+          clearInterval(myTimer);
+
+          setTimeout(function(){
+            var myTimer = setInterval(function()
+            {
+              if(close($("#the-front-wall-door .left"),$("#the-front-wall-door .right"),1.51))
+              {
+                clearInterval(myTimer);
+                lock = false;
+              }
+                }, 50);
+          }, 1000);
+        }
+      }, 50);
+    }
+}
+  // console.log('Player has collided with body #' + e.detail.body.id);
+});
+
+function open(portegauche,portedroite,positionarret)
+{
+  var positiondroite = portedroite.attr('position');
+  var positiongauche = portegauche.attr('position');
+  var positiongauche_x = positiongauche.x - 0.03;
+  var positiondroite_x = positiondroite.x + 0.03;
+
+  if(positiongauche_x <= -positionarret)
+    positiongauche_x = -positionarret;
+
+  if(positiondroite_x >= positionarret)
+    positiondroite_x = positionarret;
+
+  portegauche.attr('position', objToStr({x:positiongauche_x,y:positiongauche.y,z:positiongauche.z}));
+  portedroite.attr('position', objToStr({x:positiondroite_x,y:positiondroite.y,z:positiondroite.z}));
+
+  if(positiondroite_x == positionarret && positiongauche_x == -positionarret)
+      return true;
+
+  return false;
+}
+
+function close(portegauche,portedroite,positionarret)
+{
+  var positiondroite = portedroite.attr('position');
+  var positiongauche = portegauche.attr('position');
+  var positiongauche_x = positiongauche.x + 0.03;
+  var positiondroite_x = positiondroite.x - 0.03;
+
+  if(positiongauche_x >= -positionarret)
+    positiongauche_x = -positionarret;
+
+  if(positiondroite_x <= positionarret)
+    positiondroite_x = positionarret;
+
+  portegauche.attr('position', objToStr({x:positiongauche_x,y:positiongauche.y,z:positiongauche.z}));
+  portedroite.attr('position', objToStr({x:positiondroite_x,y:positiondroite.y,z:positiondroite.z}));
+
+  if(positiongauche_x == -positionarret && positiondroite_x == positionarret)
+    return true;
+
+      return false;
+}
+var lightflag = true;
+var myTimer = setInterval(function(){
+  if(player.attr('position').z < 10 && lightflag)
+  {
+    setTimeout(function(){document.querySelector('#light').setAttribute('light',{type: 'ambient',color: '#CCC'});}, 500);
+    setTimeout(function(){document.querySelector('#light').setAttribute('light',{type: 'ambient',color: 'black'});}, 700);
+    setTimeout(function(){document.querySelector('#light').setAttribute('light',{type: 'ambient',color: '#CCC'});    lightflag = false;}, 1050);
+  }
+  else if(player.attr('position').z > 10 && !lightflag)
+  {
+  setTimeout(function(){document.querySelector('#light').setAttribute('light',{type: 'ambient',color: 'black'});  lightflag = true;}, 500);
+  }
+}, 100);
