@@ -19,7 +19,7 @@ module.exports = function(grunt) {
             closeTag: '<!-- endgrunt -->'
           },
           src: [
-              'js/*.js'
+              'js/project/*.js'
           ],
           dest: 'index.html'
       }
