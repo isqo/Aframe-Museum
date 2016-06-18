@@ -1,5 +1,7 @@
   var player = $('#player');
+  var animation = true;
   var tux =$('#Tux');
+  var points = document.getElementsByClassName("point");
 
   var cynlinderHeight = $('#cylinder').attr('geometry').height;
   player.attr('position', objToStr({x:0,y:cynlinderHeight/2 + 5,z:12}));
