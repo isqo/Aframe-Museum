@@ -13,7 +13,7 @@ Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that p
   <img alt="A-Painter" target="_blank" src="https://user-images.githubusercontent.com/8776142/27986562-c203f7e0-6400-11e7-82c0-934ed4578291.png" height="190" width="32%">
 </a>
 
-those screenshots have been taken on mozilla Firefox.
+those screenshots have been taken on **mozilla Firefox**.
 ## Getting Started
 ### Prerequisites
 First, you'll need to download the javascript dependencies with [Bower](https://bower.io/) (a package manager for the web).
