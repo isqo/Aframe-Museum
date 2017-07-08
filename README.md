@@ -14,8 +14,7 @@ Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that p
 </a>
 
 those screenshots have been taken on **mozilla Firefox**.
-## Getting Started
-### Prerequisites
+## Prerequisites
 First, you'll need to download the javascript dependencies with [Bower](https://bower.io/) (a package manager for the web).
 Bower is a command line utility that requires node, npm and git.
 Install it with npm if you don't have it :
@@ -28,7 +27,7 @@ bower install
 ```
 it'll install the project dependencies listed in bower.json
 
-### Getting around
+## Getting around
 
 | key        | Action           | 
 | ------------- |:-------------:| 
