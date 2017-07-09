@@ -63,5 +63,8 @@ If you want to update the tags, run the following command:
 ```
 grunt slt
 ```
+## Authors
+Ismail QOUIQA :: ismail.qouiqa@gmail.com :: [@QouiqaIsmail](https://twitter.com/QouiqaIsmail)
+
 ## License
 This program is free software and is distributed under an MIT License.
