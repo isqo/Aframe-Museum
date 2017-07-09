@@ -14,18 +14,6 @@ Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that p
 </a>
 
 those screenshots have been taken on **mozilla Firefox**.
-## Prerequisites
-First, you'll need to download the javascript dependencies with [Bower](https://bower.io/) (a package manager for the web).
-Bower is a command line utility that requires node, npm and git.
-Install it with npm if you don't have it :
-```
-npm install -g bower
-```
-to install the dependencies, navigate to the project directory and run the following command :
-```
-bower install
-```
-it'll install the project dependencies listed in bower.json
 
 ## Getting around
 
@@ -35,12 +23,36 @@ it'll install the project dependencies listed in bower.json
 | s | move backward      |
 | q | move left     |
 | d | move right     |
+| space bar | jump |
 
 to turn around, use the mouse.
-
 ## Built With
 * [Aframe](https://github.com/aframevr/aframe/) - web framework for building virtual reality experiences.
 * [Jquery](https://github.com/jquery/jquery) - Javascript library
 
+## Development
+if you want to contribute to the project or to manipulate it, you should have these tools :
+* [npm](https://www.npmjs.com/) - npm is the package manager for JavaScript and the world’s largest software registry. 
+* [browserify](http://browserify.org/) - Browserify lets you require('modules') in the browser by bundling up all of your dependencies.
+* [grunt](https://gruntjs.com/getting-started) the JavaScript Task Runner
+* [grunt-script-link-tags](https://www.npmjs.com/package/grunt-script-link-tags) - Auto-generate <script> and <link> tags for your HTML files.
+### why npm ?
+To install the dependencies of the project which are listed in package.json, navigate to the project directory and run the following command :
+```
+npm install
+```
+### why browserify ?
+We use browserify to bundle up **maintobrowserify.js** (it contains some dependencies) into **bundle.js** which is included in index.html.
+run the following command from **js/** if you want to bundle up maintobrowserify.js:
+```
+browserify maintobrowserify.js > bundle.js
+``` 
+### why grunt and grunt-script-link-tags?
+We use the plugin **grunt-script-link-tags** to add automatically script tags of all the javascript files located in **js/project** in 
+index.html.To run the plugin, you should have grunt installed.
+If you want to update the tags, run the following command:
+```
+grunt slt
+```
 ## License
 This program is free software and is distributed under an MIT License.
