@@ -14,7 +14,7 @@ Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that p
 </a>
 
 ## How to visit the museum
-Actually, you can visit the museum only with the browser **mozilla firefox.**
+Currently, you can visit the museum only with the browser **mozilla firefox.**
 Navigate to the project directory and open index.html.
 
 ## Getting around
