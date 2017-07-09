@@ -1,5 +1,5 @@
 # Aframe-Museum
-Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that provides HTML components to make WebVR and build virtual reality experience.**The museum is located somewhere in the space where nobody lives except a cute penguin that will guide you through your journey.I hope you'll enjoy the experience.**
+Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that provides HTML components to make WebVR and build virtual reality experience.The museum is located somewhere in the space where nobody lives except a cute penguin that will guide you through your journey.I hope you'll enjoy the experience.
 ## screenshots
 <a href="https://user-images.githubusercontent.com/8776142/27985796-c5867608-63f2-11e7-9aab-a984da21bd83.png">
   <img alt="A-Painter" target="_blank" src="https://user-images.githubusercontent.com/8776142/27985796-c5867608-63f2-11e7-9aab-a984da21bd83.png" height="190" width="32%">
@@ -15,7 +15,7 @@ Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that p
 
 those screenshots have been taken on **mozilla Firefox**.
 ## How to visit the museum
-Actually, you can visit the museum only with the browser**mozilla firefox.**
+Actually, you can visit the museum only with the browser **mozilla firefox.**
 
 ## Getting around
 
