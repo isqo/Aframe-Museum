@@ -15,7 +15,7 @@ Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that p
 
 ## How to visit the museum
 Currently, you can visit the museum only with the browser **mozilla firefox.**
-Navigate to the project directory and open index.html.
+Navigate to the project folder and open index.html.
 
 ## Getting around
 
@@ -46,7 +46,7 @@ if you want to contribute to the project or to manipulate it, you should have th
 * [grunt-script-link-tags](https://www.npmjs.com/package/grunt-script-link-tags) - Auto-generate <script> and <link> tags for your HTML files.
 ### why npm ?
 We use npm to install the dependencies of the project which are listed in package.json.</br>
-Navigate to the project directory and run the following command :
+Navigate to the project folder and run the following command :
 ```
 npm install
 ```
