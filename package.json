@@ -1,19 +1,11 @@
 {
-  "name": "museum-project",
-  "description": "Boilerplate for creating WebVR scenes using A-Frame",
+  "name": "Museum-project",
+  "description": "3D virtual Museum built using aframe",
   "version": "1.0.0",
   "license": "MIT",
-  "scripts": {
-    "start": "budo --live --verbose --port 3000 --open",
-    "deploy": "ghpages",
-    "ghpages": "ghpages"
-  },
   "devDependencies": {
-    "budo": "^7.0.0",
-    "ghpages": "0.0.3",
     "grunt": "^1.0.1",
-    "grunt-script-link-tags": "^1.0.2",
-    "grunt-wiredep": "^3.0.1"
+    "grunt-script-link-tags": "^1.0.2"
   },
   "keywords": [
     "aframe",
@@ -21,14 +13,10 @@
     "aframe-scene",
     "aframe-boilerplate"
   ],
-  "main": "index.js",
-  "repository": {
-    "type": "git",
-    "url": "git+https://bitbucket.org/isqo/a-frame-museum.git"
-  },
   "author": "Ismail QOUIQA",
-  "homepage": "https://bitbucket.org/isqo/a-frame-museum#readme",
+  "homepage": "https://github.com/isqo",
   "dependencies": {
-    "aframe-extras": "^1.14.0"
+    "aframe-extras": "^1.14.0",
+	"jquery": "~2.2.3"
   }
 }

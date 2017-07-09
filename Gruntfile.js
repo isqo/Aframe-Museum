@@ -1,6 +1,5 @@
 module.exports = function(grunt) {
 
-  grunt.loadNpmTasks('grunt-wiredep');
   grunt.loadNpmTasks('grunt-contrib-watch');
   grunt.loadNpmTasks('grunt-script-link-tags');
 
@@ -26,6 +25,5 @@ module.exports = function(grunt) {
   }
   });
   
-  grunt.registerTask('default', ['wiredep']);
   grunt.registerTask('slt', ['tags']);
 };

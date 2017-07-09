@@ -6,11 +6,8 @@ window.$ = $;
 
 var extras = require('aframe-extras');
 extras.registerAll();
-
-// require('aframe-physics-components');
-
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"aframe-extras":2,"jquery":44}],2:[function(require,module,exports){
+},{"aframe-extras":2,"jquery":46}],2:[function(require,module,exports){
 module.exports = {
   controls:   require('./src/controls'),
   loaders:    require('./src/loaders'),
@@ -31,43 +28,34 @@ module.exports = {
   }
 };
 
-},{"./src/controls":13,"./src/loaders":19,"./src/math":22,"./src/misc":26,"./src/physics":31,"./src/primitives":39,"./src/shadows":40}],3:[function(require,module,exports){
-var CANNON = require('cannon');
+},{"./src/controls":15,"./src/loaders":21,"./src/math":24,"./src/misc":28,"./src/physics":34,"./src/primitives":42,"./src/shadows":43}],3:[function(require,module,exports){
+var CANNON = require('cannon'),
+    quickhull = require('./THREE.quickhull');
+
+var Type = {
+  BOX: 'Box',
+  HULL: 'ConvexPolyhedron'
+};
 
 /**
  * Given a THREE.Object3D instance, creates a corresponding CANNON shape.
  * @param  {THREE.Object3D} object
  * @return {CANNON.Shape}
  */
-module.exports = function (object, options) {
+module.exports = CANNON.mesh2shape = function (object, options) {
   options = options || {};
 
-  if (options.type === 'BoxGeometry') {
+  if (options.type === Type.BOX) {
     return createBoundingBoxShape(object);
+  } else if (options.type === Type.HULL) {
+    return createConvexPolyhedron(object);
   } else if (options.type) {
     throw new Error('[CANNON.mesh2shape] Invalid type "%s".', options.type);
   }
 
-  var geometry, meshes = [];
-  object.traverse(function (object) {
-    if (object.type === 'Mesh') {
-      meshes.push(object);
-    }
-  });
+  var geometry = getGeometry(object);
 
-  if (meshes.length > 1) {
-    // Merge additional geometries into the first. Could try to create a
-    // compound shape from primitives, but this is probably a custom model, and
-    // doing that well automatically is complex.
-    geometry = meshes.pop().geometry.clone();
-    for (var i = 0; i < meshes.length; i++) {
-      geometry.merge(meshes[i].geometry);
-    }
-  } else if (meshes.length === 1) {
-    geometry = meshes[0].geometry;
-  } else if (meshes.length === 0) {
-    return null;
-  }
+  if (!geometry) return null;
 
   switch (geometry.type) {
     case 'BoxGeometry':
@@ -93,11 +81,7 @@ module.exports = function (object, options) {
   }
 };
 
-/******************************************************************************
- * Type overrides
- */
-
-module.exports.Type = {BOX: 'BoxGeometry'};
+CANNON.mesh2shape.Type = Type;
 
 /******************************************************************************
  * Shape construction
@@ -109,9 +93,9 @@ module.exports.Type = {BOX: 'BoxGeometry'};
  * @return {CANNON.Shape}
  */
 function createBoundingBoxShape (object) {
-  var box,
-      shape,
+  var box, shape, localPosition, worldPosition,
       helper = new THREE.BoundingBoxHelper(object);
+
   helper.update();
   box = helper.box;
 
@@ -123,12 +107,52 @@ function createBoundingBoxShape (object) {
     (box.max.z - box.min.z) / 2
   ));
 
-  helper.position.sub(object.position);
-  if (helper.position.lengthSq()) {
-    shape.offset = helper.position;
+  object.updateMatrixWorld();
+  worldPosition = new THREE.Vector3();
+  worldPosition.setFromMatrixPosition(object.matrixWorld);
+  localPosition = helper.position.sub(worldPosition);
+  if (localPosition.lengthSq()) {
+    shape.offset = localPosition;
   }
 
   return shape;
+}
+
+/**
+ * Computes 3D convex hull as a CANNON.ConvexPolyhedron.
+ * @param  {THREE.Object3D} mesh
+ * @return {CANNON.Shape}
+ */
+function createConvexPolyhedron (object) {
+  var i, vertices, faces, hull,
+      eps = 1e-4,
+      geometry = getGeometry(object);
+
+  if (!geometry || !geometry.vertices.length) return null;
+
+  // Perturb.
+  for (i = 0; i < geometry.vertices.length; i++) {
+    geometry.vertices[i].x += (Math.random() - 0.5) * eps;
+    geometry.vertices[i].y += (Math.random() - 0.5) * eps;
+    geometry.vertices[i].z += (Math.random() - 0.5) * eps;
+  }
+
+  // Compute the 3D convex hull.
+  hull = quickhull(geometry);
+
+  // Convert from THREE.Vector3 to CANNON.Vec3.
+  vertices = new Array(hull.vertices.length);
+  for (i = 0; i < hull.vertices.length; i++) {
+    vertices[i] = new CANNON.Vec3(hull.vertices[i].x, hull.vertices[i].y, hull.vertices[i].z);
+  }
+
+  // Convert from THREE.Face to Array<number>.
+  faces = new Array(hull.faces.length);
+  for (i = 0; i < hull.faces.length; i++) {
+    faces[i] = [hull.faces[i].a, hull.faces[i].b, hull.faces[i].c];
+  }
+
+  return new CANNON.ConvexPolyhedron(vertices, faces);
 }
 
 /**
@@ -218,14 +242,75 @@ function createTrimeshShape (geometry) {
  */
 
 /**
+ * Returns a single geometry for the given object. If the object is compound,
+ * its geometries are automatically merged.
+ * @param {THREE.Object3D} object
+ * @return {THREE.Geometry}
+ */
+function getGeometry (object) {
+  var matrix, mesh,
+      meshes = getMeshes(object),
+      tmp = new THREE.Geometry(),
+      combined = new THREE.Geometry();
+
+  if (meshes.length === 0) return null;
+  if (meshes.length === 1) return meshes[0].geometry;
+
+  while ((mesh = meshes.pop())) {
+    if (mesh.geometry instanceof THREE.BufferGeometry) {
+      tmp.fromBufferGeometry(mesh.geometry);
+      combined.merge(tmp, mesh.userData.matrix || mesh.matrix);
+    } else {
+      combined.merge(mesh.geometry, mesh.userData.matrix || mesh.matrix);
+    }
+    delete mesh.userData.matrix;
+  }
+
+  matrix = new THREE.Matrix4();
+  matrix.scale(object.scale);
+  combined.applyMatrix(matrix);
+  return combined;
+}
+
+/**
  * @param  {THREE.Geometry} geometry
  * @return {Array<number>}
  */
 function getVertices (geometry) {
-  if (geometry.attributes) {
-    return geometry.attributes.position.array;
+  if (!geometry.attributes) {
+    geometry = new THREE.BufferGeometry().fromGeometry(geometry);
   }
-  return geometry.vertices || [];
+  return geometry.attributes.position.array;
+}
+
+/**
+ * Returns a flat array of THREE.Mesh instances from the given object. If
+ * nested transformations are found, they are applied to child meshes
+ * as mesh.userData.matrix, so that each mesh has its position/rotation/scale
+ * independently of all of its parents except the top-level object.
+ * @param  {THREE.Object3D} object
+ * @return {Array<THREE.Mesh>}
+ */
+function getMeshes (object) {
+  var meshes = [],
+      identity = new THREE.Matrix4();
+
+  object.traverse(function (o) {
+    o.updateMatrix();
+    if (o.type === 'Mesh') {
+      meshes.push(o);
+    } else if (o !== object && !o.matrix.equals(identity)) {
+      // If transformations are applied to a THREE.Object3D or THREE.Group,
+      // they need to be inherited by descendent geometry.
+      o.traverse(function (o2) {
+        o2.updateMatrix();
+        o2.userData.matrix = o2.userData.matrix || o2.matrix.clone();
+        o2.userData.matrix.multiply(o.matrix);
+      });
+    }
+  });
+
+  return meshes;
 }
 
 /**
@@ -253,7 +338,7 @@ function centerGeometry (geometry) {
   return geometry;
 }
 
-},{"cannon":43}],4:[function(require,module,exports){
+},{"./THREE.quickhull":9,"cannon":11}],4:[function(require,module,exports){
 /**
  * CANNON.shape2mesh
  *
@@ -413,7 +498,7 @@ CANNON.shape2mesh = function(body){
 
 module.exports = CANNON.shape2mesh;
 
-},{"cannon":43}],5:[function(require,module,exports){
+},{"cannon":11}],5:[function(require,module,exports){
 /**
  * @author yamahigashi https://github.com/yamahigashi
  *
@@ -3692,6 +3777,458 @@ THREE.PLYLoader.prototype = {
 
 },{}],9:[function(require,module,exports){
 /**
+
+  QuickHull
+  ---------
+
+  The MIT License
+
+  Copyright &copy; 2010-2014 three.js authors
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+
+  THE SOFTWARE.
+
+
+    @author mark lundin / http://mark-lundin.com
+
+    This is a 3D implementation of the Quick Hull algorithm.
+    It is a fast way of computing a convex hull with average complexity
+    of O(n log(n)).
+    It uses depends on three.js and is supposed to create THREE.Geometry.
+
+    It's also very messy
+
+ */
+
+module.exports = (function(){
+
+
+  var faces     = [],
+    faceStack   = [],
+    i, NUM_POINTS, extremes,
+    max     = 0,
+    dcur, current, j, v0, v1, v2, v3,
+    N, D;
+
+  var ab, ac, ax,
+    suba, subb, normal,
+    diff, subaA, subaB, subC;
+
+  function reset(){
+
+    ab    = new THREE.Vector3(),
+    ac    = new THREE.Vector3(),
+    ax    = new THREE.Vector3(),
+    suba  = new THREE.Vector3(),
+    subb  = new THREE.Vector3(),
+    normal  = new THREE.Vector3(),
+    diff  = new THREE.Vector3(),
+    subaA = new THREE.Vector3(),
+    subaB = new THREE.Vector3(),
+    subC  = new THREE.Vector3();
+
+  }
+
+  //temporary vectors
+
+  function process( points ){
+
+    // Iterate through all the faces and remove
+    while( faceStack.length > 0  ){
+      cull( faceStack.shift(), points );
+    }
+  }
+
+
+  var norm = function(){
+
+    var ca = new THREE.Vector3(),
+      ba = new THREE.Vector3(),
+      N = new THREE.Vector3();
+
+    return function( a, b, c ){
+
+      ca.subVectors( c, a );
+      ba.subVectors( b, a );
+
+      N.crossVectors( ca, ba );
+
+      return N.normalize();
+    }
+
+  }();
+
+
+  function getNormal( face, points ){
+
+    if( face.normal !== undefined ) return face.normal;
+
+    var p0 = points[face[0]],
+      p1 = points[face[1]],
+      p2 = points[face[2]];
+
+    ab.subVectors( p1, p0 );
+    ac.subVectors( p2, p0 );
+    normal.crossVectors( ac, ab );
+    normal.normalize();
+
+    return face.normal = normal.clone();
+
+  }
+
+
+  function assignPoints( face, pointset, points ){
+
+    // ASSIGNING POINTS TO FACE
+    var p0 = points[face[0]],
+      dots = [], apex,
+      norm = getNormal( face, points );
+
+
+    // Sory all the points by there distance from the plane
+    pointset.sort( function( aItem, bItem ){
+
+
+      dots[aItem.x/3] = dots[aItem.x/3] !== undefined ? dots[aItem.x/3] : norm.dot( suba.subVectors( aItem, p0 ));
+      dots[bItem.x/3] = dots[bItem.x/3] !== undefined ? dots[bItem.x/3] : norm.dot( subb.subVectors( bItem, p0 ));
+
+      return dots[aItem.x/3] - dots[bItem.x/3] ;
+    });
+
+    //TODO :: Must be a faster way of finding and index in this array
+    var index = pointset.length;
+
+    if( index === 1 ) dots[pointset[0].x/3] = norm.dot( suba.subVectors( pointset[0], p0 ));
+    while( index-- > 0 && dots[pointset[index].x/3] > 0 )
+
+    var point;
+    if( index + 1 < pointset.length && dots[pointset[index+1].x/3] > 0 ){
+
+      face.visiblePoints  = pointset.splice( index + 1 );
+    }
+  }
+
+
+
+
+  function cull( face, points ){
+
+    var i = faces.length,
+      dot, visibleFace, currentFace,
+      visibleFaces = [face];
+
+    var apex = points.indexOf( face.visiblePoints.pop() );
+
+    // Iterate through all other faces...
+    while( i-- > 0 ){
+      currentFace = faces[i];
+      if( currentFace !== face ){
+        // ...and check if they're pointing in the same direction
+        dot = getNormal( currentFace, points ).dot( diff.subVectors( points[apex], points[currentFace[0]] ));
+        if( dot > 0 ){
+          visibleFaces.push( currentFace );
+        }
+      }
+    }
+
+    var index, neighbouringIndex, vertex;
+
+    // Determine Perimeter - Creates a bounded horizon
+
+    // 1. Pick an edge A out of all possible edges
+    // 2. Check if A is shared by any other face. a->b === b->a
+      // 2.1 for each edge in each triangle, isShared = ( f1.a == f2.a && f1.b == f2.b ) || ( f1.a == f2.b && f1.b == f2.a )
+    // 3. If not shared, then add to convex horizon set,
+        //pick an end point (N) of the current edge A and choose a new edge NA connected to A.
+        //Restart from 1.
+    // 4. If A is shared, it is not an horizon edge, therefore flag both faces that share this edge as candidates for culling
+    // 5. If candidate geometry is a degenrate triangle (ie. the tangent space normal cannot be computed) then remove that triangle from all further processing
+
+
+    var j = i = visibleFaces.length;
+    var isDistinct = false,
+      hasOneVisibleFace = i === 1,
+      cull = [],
+      perimeter = [],
+      edgeIndex = 0, compareFace, nextIndex,
+      a, b;
+
+    var allPoints = [];
+    var originFace = [visibleFaces[0][0], visibleFaces[0][1], visibleFaces[0][1], visibleFaces[0][2], visibleFaces[0][2], visibleFaces[0][0]];
+
+
+    if( visibleFaces.length === 1 ){
+      currentFace = visibleFaces[0];
+
+      perimeter = [currentFace[0], currentFace[1], currentFace[1], currentFace[2], currentFace[2], currentFace[0]];
+      // remove visible face from list of faces
+      if( faceStack.indexOf( currentFace ) > -1 ){
+        faceStack.splice( faceStack.indexOf( currentFace ), 1 );
+      }
+
+
+      if( currentFace.visiblePoints ) allPoints = allPoints.concat( currentFace.visiblePoints );
+      faces.splice( faces.indexOf( currentFace ), 1 );
+
+    }else{
+
+      while( i-- > 0  ){  // for each visible face
+
+        currentFace = visibleFaces[i];
+
+        // remove visible face from list of faces
+        if( faceStack.indexOf( currentFace ) > -1 ){
+          faceStack.splice( faceStack.indexOf( currentFace ), 1 );
+        }
+
+        if( currentFace.visiblePoints ) allPoints = allPoints.concat( currentFace.visiblePoints );
+        faces.splice( faces.indexOf( currentFace ), 1 );
+
+
+        var isSharedEdge;
+        cEdgeIndex = 0;
+
+        while( cEdgeIndex < 3 ){ // Iterate through it's edges
+
+          isSharedEdge = false;
+          j = visibleFaces.length;
+          a = currentFace[cEdgeIndex]
+          b = currentFace[(cEdgeIndex+1)%3];
+
+
+          while( j-- > 0 && !isSharedEdge ){ // find another visible faces
+
+            compareFace = visibleFaces[j];
+            edgeIndex = 0;
+
+            // isSharedEdge = compareFace == currentFace;
+            if( compareFace !== currentFace ){
+
+              while( edgeIndex < 3 && !isSharedEdge ){ //Check all it's indices
+
+                nextIndex = ( edgeIndex + 1 );
+                isSharedEdge = ( compareFace[edgeIndex] === a && compareFace[nextIndex%3] === b ) ||
+                         ( compareFace[edgeIndex] === b && compareFace[nextIndex%3] === a );
+
+                edgeIndex++;
+              }
+            }
+          }
+
+          if( !isSharedEdge || hasOneVisibleFace ){
+            perimeter.push( a );
+            perimeter.push( b );
+          }
+
+          cEdgeIndex++;
+        }
+      }
+    }
+
+    // create new face for all pairs around edge
+    i = 0;
+    var l = perimeter.length/2;
+    var f;
+
+    while( i < l ){
+      f = [ perimeter[i*2+1], apex, perimeter[i*2] ];
+      assignPoints( f, allPoints, points );
+      faces.push( f )
+      if( f.visiblePoints !== undefined  )faceStack.push( f );
+      i++;
+    }
+
+  }
+
+  var distSqPointSegment = function(){
+
+    var ab = new THREE.Vector3(),
+      ac = new THREE.Vector3(),
+      bc = new THREE.Vector3();
+
+    return function( a, b, c ){
+
+        ab.subVectors( b, a );
+        ac.subVectors( c, a );
+        bc.subVectors( c, b );
+
+        var e = ac.dot(ab);
+        if (e < 0.0) return ac.dot( ac );
+        var f = ab.dot( ab );
+        if (e >= f) return bc.dot(  bc );
+        return ac.dot( ac ) - e * e / f;
+
+      }
+
+  }();
+
+
+
+
+
+  return function( geometry ){
+
+    reset();
+
+
+    points    = geometry.vertices;
+    faces     = [],
+    faceStack   = [],
+    i       = NUM_POINTS = points.length,
+    extremes  = points.slice( 0, 6 ),
+    max     = 0;
+
+
+
+    /*
+     *  FIND EXTREMETIES
+     */
+    while( i-- > 0 ){
+      if( points[i].x < extremes[0].x ) extremes[0] = points[i];
+      if( points[i].x > extremes[1].x ) extremes[1] = points[i];
+
+      if( points[i].y < extremes[2].y ) extremes[2] = points[i];
+      if( points[i].y < extremes[3].y ) extremes[3] = points[i];
+
+      if( points[i].z < extremes[4].z ) extremes[4] = points[i];
+      if( points[i].z < extremes[5].z ) extremes[5] = points[i];
+    }
+
+
+    /*
+     *  Find the longest line between the extremeties
+     */
+
+    j = i = 6;
+    while( i-- > 0 ){
+      j = i - 1;
+      while( j-- > 0 ){
+          if( max < (dcur = extremes[i].distanceToSquared( extremes[j] )) ){
+        max = dcur;
+        v0 = extremes[ i ];
+        v1 = extremes[ j ];
+
+          }
+        }
+      }
+
+
+      // 3. Find the most distant point to the line segment, this creates a plane
+      i = 6;
+      max = 0;
+    while( i-- > 0 ){
+      dcur = distSqPointSegment( v0, v1, extremes[i]);
+      if( max < dcur ){
+        max = dcur;
+            v2 = extremes[ i ];
+          }
+    }
+
+
+      // 4. Find the most distant point to the plane.
+
+      N = norm(v0, v1, v2);
+      D = N.dot( v0 );
+
+
+      max = 0;
+      i = NUM_POINTS;
+      while( i-- > 0 ){
+        dcur = Math.abs( points[i].dot( N ) - D );
+          if( max < dcur ){
+            max = dcur;
+            v3 = points[i];
+      }
+      }
+
+
+
+      var v0Index = points.indexOf( v0 ),
+      v1Index = points.indexOf( v1 ),
+      v2Index = points.indexOf( v2 ),
+      v3Index = points.indexOf( v3 );
+
+
+    //  We now have a tetrahedron as the base geometry.
+    //  Now we must subdivide the
+
+      var tetrahedron =[
+        [ v2Index, v1Index, v0Index ],
+        [ v1Index, v3Index, v0Index ],
+        [ v2Index, v3Index, v1Index ],
+        [ v0Index, v3Index, v2Index ],
+    ];
+
+
+
+    subaA.subVectors( v1, v0 ).normalize();
+    subaB.subVectors( v2, v0 ).normalize();
+    subC.subVectors ( v3, v0 ).normalize();
+    var sign  = subC.dot( new THREE.Vector3().crossVectors( subaB, subaA ));
+
+
+    // Reverse the winding if negative sign
+    if( sign < 0 ){
+      tetrahedron[0].reverse();
+      tetrahedron[1].reverse();
+      tetrahedron[2].reverse();
+      tetrahedron[3].reverse();
+    }
+
+
+    //One for each face of the pyramid
+    var pointsCloned = points.slice();
+    pointsCloned.splice( pointsCloned.indexOf( v0 ), 1 );
+    pointsCloned.splice( pointsCloned.indexOf( v1 ), 1 );
+    pointsCloned.splice( pointsCloned.indexOf( v2 ), 1 );
+    pointsCloned.splice( pointsCloned.indexOf( v3 ), 1 );
+
+
+    var i = tetrahedron.length;
+    while( i-- > 0 ){
+      assignPoints( tetrahedron[i], pointsCloned, points );
+      if( tetrahedron[i].visiblePoints !== undefined ){
+        faceStack.push( tetrahedron[i] );
+      }
+      faces.push( tetrahedron[i] );
+    }
+
+    process( points );
+
+
+    //  Assign to our geometry object
+
+    var ll = faces.length;
+    while( ll-- > 0 ){
+      geometry.faces[ll] = new THREE.Face3( faces[ll][2], faces[ll][1], faces[ll][0], faces[ll].normal )
+    }
+
+    geometry.normalsNeedUpdate = true;
+
+    return geometry;
+
+  }
+
+}())
+
+},{}],10:[function(require,module,exports){
+/**
  * Polyfill for the additional KeyboardEvent properties defined in the D3E and
  * D4E draft specifications, by @inexorabletash.
  *
@@ -4423,2369 +4960,7 @@ THREE.PLYLoader.prototype = {
 
 } (window));
 
-},{}],10:[function(require,module,exports){
-var EPS = 0.1;
-
-module.exports = {
-  schema: {
-    enabled: {default: true},
-    mode: {default: 'teleport', oneOf: ['teleport', 'animate']},
-    animateSpeed: {default: 3.0}
-  },
-
-  init: function () {
-    this.active = true;
-    this.checkpoint = null;
-
-    this.offset = new THREE.Vector3();
-    this.position = new THREE.Vector3();
-    this.targetPosition = new THREE.Vector3();
-  },
-
-  play: function () { this.active = true; },
-  pause: function () { this.active = false; },
-
-  setCheckpoint: function (checkpoint) {
-    if (!this.active) return;
-
-    this.checkpoint = checkpoint;
-    if (this.data.mode === 'teleport') {
-      this.sync();
-      this.el.setAttribute('position', this.targetPosition);
-    }
-  },
-
-  isVelocityActive: function () {
-    return !!(this.active && this.checkpoint);
-  },
-
-  getVelocity: function () {
-    if (!this.active) return;
-
-    var data = this.data,
-        offset = this.offset,
-        position = this.position,
-        targetPosition = this.targetPosition;
-
-    this.sync();
-    if (position.distanceTo(targetPosition) < EPS) {
-      this.checkpoint = null;
-      return offset.set(0, 0, 0);
-    }
-    offset.setLength(data.animateSpeed);
-    return offset;
-  },
-
-  sync: function () {
-    var offset = this.offset,
-        position = this.position,
-        targetPosition = this.targetPosition;
-
-    position.copy(this.el.getComputedAttribute('position'));
-    targetPosition.copy(this.checkpoint.getComputedAttribute('position'));
-    // TODO - Cleverer ways around this?
-    targetPosition.y = position.y;
-    offset.copy(targetPosition).sub(position);
-  }
-};
-
 },{}],11:[function(require,module,exports){
-/**
- * Gamepad controls for A-Frame.
- *
- * Stripped-down version of: https://github.com/donmccurdy/aframe-gamepad-controls
- *
- * For more information about the Gamepad API, see:
- * https://developer.mozilla.org/en-US/docs/Web/API/Gamepad_API/Using_the_Gamepad_API
- */
-
-var GamepadButton = require('../../lib/GamepadButton'),
-    GamepadButtonEvent = require('../../lib/GamepadButtonEvent');
-
-var JOYSTICK_EPS = 0.2;
-
-module.exports = {
-
-  /*******************************************************************
-   * Statics
-   */
-
-  GamepadButton: GamepadButton,
-
-  /*******************************************************************
-   * Schema
-   */
-
-  schema: {
-    // Controller 0-3
-    controller:        { default: 0, oneOf: [0, 1, 2, 3] },
-
-    // Enable/disable features
-    enabled:           { default: true },
-
-    // Debugging
-    debug:             { default: false }
-  },
-
-  /*******************************************************************
-   * Core
-   */
-
-  /**
-   * Called once when component is attached. Generally for initial setup.
-   */
-  init: function () {
-    var scene = this.el.sceneEl;
-    this.prevTime = window.performance.now();
-
-    // Button state
-    this.buttons = {};
-
-    scene.addBehavior(this);
-
-    if (!this.getGamepad()) {
-      console.warn(
-        'Gamepad #%d not found. Connect controller and press any button to continue.',
-        this.data.controller
-      );
-    }
-  },
-
-  /**
-   * Called when component is attached and when component data changes.
-   * Generally modifies the entity based on the data.
-   */
-  update: function () { this.tick(); },
-
-  /**
-   * Called on each iteration of main render loop.
-   */
-  tick: function () {
-    this.updateButtonState();
-  },
-
-  /**
-   * Called when a component is removed (e.g., via removeAttribute).
-   * Generally undoes all modifications to the entity.
-   */
-  remove: function () { },
-
-  /*******************************************************************
-   * Universal controls - movement
-   */
-
-  isVelocityActive: function () {
-    if (!this.data.enabled || !this.isConnected()) return false;
-
-    var dpad = this.getDpad(),
-        joystick0 = this.getJoystick(0),
-        inputX = dpad.x || joystick0.x,
-        inputY = dpad.y || joystick0.y;
-
-    return Math.abs(inputX) > JOYSTICK_EPS || Math.abs(inputY) > JOYSTICK_EPS;
-  },
-
-  getVelocityDelta: function () {
-    var dpad = this.getDpad(),
-        joystick0 = this.getJoystick(0),
-        inputX = dpad.x || joystick0.x,
-        inputY = dpad.y || joystick0.y,
-        dVelocity = new THREE.Vector3();
-
-    if (Math.abs(inputX) > JOYSTICK_EPS) {
-      dVelocity.x += inputX;
-    }
-    if (Math.abs(inputY) > JOYSTICK_EPS) {
-      dVelocity.z += inputY;
-    }
-
-    return dVelocity;
-  },
-
-  /*******************************************************************
-   * Universal controls - rotation
-   */
-
-  isRotationActive: function () {
-    if (!this.data.enabled || !this.isConnected()) return false;
-
-    var joystick1 = this.getJoystick(1);
-
-    return Math.abs(joystick1.x) > JOYSTICK_EPS || Math.abs(joystick1.y) > JOYSTICK_EPS;
-  },
-
-  getRotationDelta: function () {
-    var lookVector = this.getJoystick(1);
-    if (Math.abs(lookVector.x) <= JOYSTICK_EPS) lookVector.x = 0;
-    if (Math.abs(lookVector.y) <= JOYSTICK_EPS) lookVector.y = 0;
-    return lookVector;
-  },
-
-  /*******************************************************************
-   * Button events
-   */
-
-  updateButtonState: function () {
-    var gamepad = this.getGamepad();
-    if (this.data.enabled && gamepad) {
-
-      // Fire DOM events for button state changes.
-      for (var i = 0; i < gamepad.buttons.length; i++) {
-        if (gamepad.buttons[i].pressed && !this.buttons[i]) {
-          this.emit(new GamepadButtonEvent('gamepadbuttondown', i, gamepad.buttons[i]));
-        } else if (!gamepad.buttons[i].pressed && this.buttons[i]) {
-          this.emit(new GamepadButtonEvent('gamepadbuttonup', i, gamepad.buttons[i]));
-        }
-        this.buttons[i] = gamepad.buttons[i].pressed;
-      }
-
-    } else if (Object.keys(this.buttons)) {
-      // Reset state if controls are disabled or controller is lost.
-      this.buttons = {};
-    }
-  },
-
-  emit: function (event) {
-    // Emit original event.
-    this.el.emit(event.type, event);
-
-    // Emit convenience event, identifying button index.
-    this.el.emit(
-      event.type + ':' + event.index,
-      new GamepadButtonEvent(event.type, event.index, event)
-    );
-  },
-
-  /*******************************************************************
-   * Gamepad state
-   */
-
-  /**
-   * Returns the Gamepad instance attached to the component. If connected,
-   * a proxy-controls component may provide access to Gamepad input from a
-   * remote device.
-   *
-   * @return {Gamepad}
-   */
-  getGamepad: function () {
-    var localGamepad = navigator.getGamepads
-          && navigator.getGamepads()[this.data.controller],
-        proxyControls = this.el.sceneEl.components['proxy-controls'],
-        proxyGamepad = proxyControls && proxyControls.isConnected()
-          && proxyControls.getGamepad(this.data.controller);
-    return proxyGamepad || localGamepad;
-  },
-
-  /**
-   * Returns the state of the given button.
-   * @param  {number} index The button (0-N) for which to find state.
-   * @return {GamepadButton}
-   */
-  getButton: function (index) {
-    return this.getGamepad().buttons[index];
-  },
-
-  /**
-   * Returns state of the given axis. Axes are labelled 0-N, where 0-1 will
-   * represent X/Y on the first joystick, and 2-3 X/Y on the second.
-   * @param  {number} index The axis (0-N) for which to find state.
-   * @return {number} On the interval [-1,1].
-   */
-  getAxis: function (index) {
-    return this.getGamepad().axes[index];
-  },
-
-  /**
-   * Returns the state of the given joystick (0 or 1) as a THREE.Vector2.
-   * @param  {number} id The joystick (0, 1) for which to find state.
-   * @return {THREE.Vector2}
-   */
-  getJoystick: function (index) {
-    var gamepad = this.getGamepad();
-    switch (index) {
-      case 0: return new THREE.Vector2(gamepad.axes[0], gamepad.axes[1]);
-      case 1: return new THREE.Vector2(gamepad.axes[2], gamepad.axes[3]);
-      default: throw new Error('Unexpected joystick index "%d".', index);
-    }
-  },
-
-  /**
-   * Returns the state of the dpad as a THREE.Vector2.
-   * @return {THREE.Vector2}
-   */
-  getDpad: function () {
-    var gamepad = this.getGamepad();
-    if (!gamepad.buttons[GamepadButton.DPAD_RIGHT]) {
-      return new THREE.Vector2();
-    }
-    return new THREE.Vector2(
-      (gamepad.buttons[GamepadButton.DPAD_RIGHT].pressed ? 1 : 0)
-      + (gamepad.buttons[GamepadButton.DPAD_LEFT].pressed ? -1 : 0),
-      (gamepad.buttons[GamepadButton.DPAD_UP].pressed ? -1 : 0)
-      + (gamepad.buttons[GamepadButton.DPAD_DOWN].pressed ? 1 : 0)
-    );
-  },
-
-  /**
-   * Returns true if the gamepad is currently connected to the system.
-   * @return {boolean}
-   */
-  isConnected: function () {
-    var gamepad = this.getGamepad();
-    return !!(gamepad && gamepad.connected);
-  },
-
-  /**
-   * Returns a string containing some information about the controller. Result
-   * may vary across browsers, for a given controller.
-   * @return {string}
-   */
-  getID: function () {
-    return this.getGamepad().id;
-  }
-};
-
-},{"../../lib/GamepadButton":6,"../../lib/GamepadButtonEvent":7}],12:[function(require,module,exports){
-var TICK_DEBOUNCE = 4; // ms
-
-module.exports = {
-
-  /*******************************************************************
-   * Schema
-   */
-
-  schema: {
-    enabled: { default: true }
-  },
-
-  /*******************************************************************
-   * Lifecycle
-   */
-
-  init: function () {
-    this.tPrev = 0;
-    this.dolly = new THREE.Object3D();
-    this.euler = new THREE.Euler();
-    this.controls = new THREE.VRControls(this.dolly);
-    this.zeroQuaternion = new THREE.Quaternion();
-  },
-
-  /*******************************************************************
-   * Tick
-   */
-
-  tick: function (t) {
-    t = t || Date.now();
-    if (t - this.tPrev > TICK_DEBOUNCE) {
-      this.controls.update();
-      this.tPrev = t;
-    }
-  },
-
-  /*******************************************************************
-   * Universal interface
-   */
-
-  isRotationActive: function () {
-    return this.data.enabled && !this.dolly.quaternion.equals(this.zeroQuaternion);
-  },
-
-  getRotation: (function () {
-    var hmdEuler = new THREE.Euler();
-    hmdEuler.order = 'YXZ';
-    return function () {
-      this.tick();
-      var hmdQuaternion = this.calculateHMDQuaternion();
-      hmdEuler.setFromQuaternion(hmdQuaternion);
-      return new THREE.Vector3(
-        THREE.Math.radToDeg(hmdEuler.x),
-        THREE.Math.radToDeg(hmdEuler.y),
-        THREE.Math.radToDeg(hmdEuler.z)
-      );
-    };
-  }()),
-
-  /*******************************************************************
-   * Orientation
-   */
-
-  calculateHMDQuaternion: (function () {
-    var hmdQuaternion = new THREE.Quaternion();
-    return function () {
-      var dolly = this.dolly;
-      if (!this.zeroed && !dolly.quaternion.equals(this.zeroQuaternion)) {
-        this.zeroOrientation();
-        this.zeroed = true;
-      }
-      hmdQuaternion.copy(this.zeroQuaternion).multiply(dolly.quaternion);
-      return hmdQuaternion;
-    };
-  }()),
-
-  zeroOrientation: function () {
-    var euler = new THREE.Euler();
-    euler.setFromQuaternion(this.dolly.quaternion.clone().inverse());
-    // Cancel out roll and pitch. We want to only reset yaw
-    euler.z = 0;
-    euler.x = 0;
-    this.zeroQuaternion.setFromEuler(euler);
-  }
-};
-
-},{}],13:[function(require,module,exports){
-var math = require('../math');
-
-module.exports = {
-  'checkpoint-controls': require('./checkpoint-controls'),
-  'gamepad-controls':    require('./gamepad-controls'),
-  'hmd-controls':        require('./hmd-controls'),
-  'keyboard-controls':   require('./keyboard-controls'),
-  'mouse-controls':      require('./mouse-controls'),
-  'touch-controls':      require('./touch-controls'),
-  'universal-controls':  require('./universal-controls'),
-
-  registerAll: function (AFRAME) {
-    if (this._registered) return;
-
-    AFRAME = AFRAME || window.AFRAME;
-    AFRAME = AFRAME.aframeCore || AFRAME;
-
-    math.registerAll();
-    if (!AFRAME.components['checkpoint-controls'])  AFRAME.registerComponent('checkpoint-controls', this['checkpoint-controls']);
-    if (!AFRAME.components['gamepad-controls'])     AFRAME.registerComponent('gamepad-controls',    this['gamepad-controls']);
-    if (!AFRAME.components['hmd-controls'])         AFRAME.registerComponent('hmd-controls',        this['hmd-controls']);
-    if (!AFRAME.components['keyboard-controls'])    AFRAME.registerComponent('keyboard-controls',   this['keyboard-controls']);
-    if (!AFRAME.components['mouse-controls'])       AFRAME.registerComponent('mouse-controls',      this['mouse-controls']);
-    if (!AFRAME.components['touch-controls'])       AFRAME.registerComponent('touch-controls',      this['touch-controls']);
-    if (!AFRAME.components['universal-controls'])   AFRAME.registerComponent('universal-controls',  this['universal-controls']);
-
-    this._registered = true;
-  }
-};
-
-},{"../math":22,"./checkpoint-controls":10,"./gamepad-controls":11,"./hmd-controls":12,"./keyboard-controls":14,"./mouse-controls":15,"./touch-controls":16,"./universal-controls":17}],14:[function(require,module,exports){
-require('../../lib/keyboard.polyfill');
-
-var MAX_DELTA = 0.2,
-    PROXY_FLAG = '__keyboard-controls-proxy';
-
-var KeyboardEvent = window.KeyboardEvent;
-
-/**
- * Keyboard Controls component.
- *
- * Stripped-down version of: https://github.com/donmccurdy/aframe-keyboard-controls
- *
- * Bind keyboard events to components, or control your entities with the WASD keys.
- *
- * Why use KeyboardEvent.code? "This is set to a string representing the key that was pressed to
- * generate the KeyboardEvent, without taking the current keyboard layout (e.g., QWERTY vs.
- * Dvorak), locale (e.g., English vs. French), or any modifier keys into account. This is useful
- * when you care about which physical key was pressed, rather thanwhich character it corresponds
- * to. For example, if you’re a writing a game, you might want a certain set of keys to move the
- * player in different directions, and that mapping should ideally be independent of keyboard
- * layout. See: https://developers.google.com/web/updates/2016/04/keyboardevent-keys-codes
- *
- * @namespace wasd-controls
- * keys the entity moves and if you release it will stop. Easing simulates friction.
- * to the entity when pressing the keys.
- * @param {bool} [enabled=true] - To completely enable or disable the controls
- */
-module.exports = {
-  schema: {
-    enabled:           { default: true },
-    debug:             { default: false }
-  },
-
-  init: function () {
-    this.dVelocity = new THREE.Vector3();
-    this.localKeys = {};
-    this.listeners = {
-      keydown: this.onKeyDown.bind(this),
-      keyup: this.onKeyUp.bind(this),
-      blur: this.onBlur.bind(this)
-    };
-    this.attachEventListeners();
-  },
-
-  /*******************************************************************
-  * Movement
-  */
-
-  isVelocityActive: function () {
-    return this.data.enabled && !!Object.keys(this.getKeys()).length;
-  },
-
-  getVelocityDelta: function () {
-    var data = this.data,
-        keys = this.getKeys();
-
-    this.dVelocity.set(0, 0, 0);
-    if (data.enabled) {
-      if (keys.KeyW || keys.ArrowUp)    { this.dVelocity.z -= 1; }
-      if (keys.KeyA || keys.ArrowLeft)  { this.dVelocity.x -= 1; }
-      if (keys.KeyS || keys.ArrowDown)  { this.dVelocity.z += 1; }
-      if (keys.KeyD || keys.ArrowRight) { this.dVelocity.x += 1; }
-    }
-
-    return this.dVelocity.clone();
-  },
-
-  /*******************************************************************
-  * Events
-  */
-
-  play: function () {
-    this.attachEventListeners();
-  },
-
-  pause: function () {
-    this.removeEventListeners();
-  },
-
-  remove: function () {
-    this.pause();
-  },
-
-  attachEventListeners: function () {
-    window.addEventListener('keydown', this.listeners.keydown, false);
-    window.addEventListener('keyup', this.listeners.keyup, false);
-    window.addEventListener('blur', this.listeners.blur, false);
-  },
-
-  removeEventListeners: function () {
-    window.removeEventListener('keydown', this.listeners.keydown);
-    window.removeEventListener('keyup', this.listeners.keyup);
-    window.removeEventListener('blur', this.listeners.blur);
-  },
-
-  onKeyDown: function (event) {
-    this.localKeys[event.code] = true;
-    this.emit(event);
-  },
-
-  onKeyUp: function (event) {
-    delete this.localKeys[event.code];
-    this.emit(event);
-  },
-
-  onBlur: function () {
-    for (var code in this.localKeys) {
-      if (this.localKeys.hasOwnProperty(code)) {
-        delete this.localKeys[code];
-      }
-    }
-  },
-
-  emit: function (event) {
-    // TODO - keydown only initially?
-    // TODO - where the f is the spacebar
-
-    // Emit original event.
-    if (PROXY_FLAG in event) {
-      // TODO - Method never triggered.
-      this.el.emit(event.type, event);
-    }
-
-    // Emit convenience event, identifying key.
-    this.el.emit(event.type + ':' + event.code, new KeyboardEvent(event.type, event));
-    if (this.data.debug) console.log(event.type + ':' + event.code);
-  },
-
-  /*******************************************************************
-  * Accessors
-  */
-
-  isPressed: function (code) {
-    return code in this.getKeys();
-  },
-
-  getKeys: function () {
-    if (this.isProxied()) {
-      return this.el.sceneEl.components['proxy-controls'].getKeyboard();
-    }
-    return this.localKeys;
-  },
-
-  isProxied: function () {
-    var proxyControls = this.el.sceneEl.components['proxy-controls'];
-    return proxyControls && proxyControls.isConnected();
-  }
-
-};
-
-},{"../../lib/keyboard.polyfill":9}],15:[function(require,module,exports){
-/**
- * Mouse + Pointerlock controls.
- *
- * Based on: https://github.com/aframevr/aframe/pull/1056
- */
-module.exports = {
-  schema: {
-    enabled: { default: true },
-    pointerlockEnabled: { default: true },
-    sensitivity: { default: 1 / 25 }
-  },
-
-  init: function () {
-    this.mouseDown = false;
-    this.pointerLocked = false;
-    this.lookVector = new THREE.Vector2();
-    this.bindMethods();
-  },
-
-  play: function () {
-    this.addEventListeners();
-  },
-
-  pause: function () {
-    this.removeEventListeners();
-    this.lookVector.set(0, 0);
-  },
-
-  remove: function () {
-    this.pause();
-  },
-
-  bindMethods: function () {
-    this.onMouseDown = this.onMouseDown.bind(this);
-    this.onMouseMove = this.onMouseMove.bind(this);
-    this.onMouseUp = this.onMouseUp.bind(this);
-    this.onMouseUp = this.onMouseUp.bind(this);
-    this.onPointerLockChange = this.onPointerLockChange.bind(this);
-    this.onPointerLockChange = this.onPointerLockChange.bind(this);
-    this.onPointerLockChange = this.onPointerLockChange.bind(this);
-  },
-
-  addEventListeners: function () {
-    var sceneEl = this.el.sceneEl;
-    var canvasEl = sceneEl.canvas;
-    var data = this.data;
-
-    if (!canvasEl) {
-      sceneEl.addEventListener('render-target-loaded', this.addEventListeners.bind(this));
-      return;
-    }
-
-    canvasEl.addEventListener('mousedown', this.onMouseDown, false);
-    canvasEl.addEventListener('mousemove', this.onMouseMove, false);
-    canvasEl.addEventListener('mouseup', this.onMouseUp, false);
-    canvasEl.addEventListener('mouseout', this.onMouseUp, false);
-
-    if (data.pointerlockEnabled) {
-      document.addEventListener('pointerlockchange', this.onPointerLockChange, false);
-      document.addEventListener('mozpointerlockchange', this.onPointerLockChange, false);
-      document.addEventListener('pointerlockerror', this.onPointerLockError, false);
-    }
-  },
-
-  removeEventListeners: function () {
-    var canvasEl = this.el.sceneEl && this.sceneEl.canvas;
-    if (canvasEl) {
-      canvasEl.removeEventListener('mousedown', this.onMouseDown, false);
-      canvasEl.removeEventListener('mousemove', this.onMouseMove, false);
-      canvasEl.removeEventListener('mouseup', this.onMouseUp, false);
-      canvasEl.removeEventListener('mouseout', this.onMouseUp, false);
-    }
-    document.removeEventListener('pointerlockchange', this.onPointerLockChange, false);
-    document.removeEventListener('mozpointerlockchange', this.onPointerLockChange, false);
-    document.removeEventListener('pointerlockerror', this.onPointerLockError, false);
-  },
-
-  isRotationActive: function () {
-    return this.data.enabled && (this.mouseDown || this.pointerLocked);
-  },
-
-  /**
-   * Returns the sum of all mouse movement since last call.
-   */
-  getRotationDelta: function () {
-    var dRotation = this.lookVector.clone().multiplyScalar(this.data.sensitivity);
-    this.lookVector.set(0, 0);
-    return dRotation;
-  },
-
-  onMouseMove: function (event) {
-    var previousMouseEvent = this.previousMouseEvent;
-
-    if (!this.data.enabled || !(this.mouseDown || this.pointerLocked)) {
-      return;
-    }
-
-    var movementX = event.movementX || event.mozMovementX || 0;
-    var movementY = event.movementY || event.mozMovementY || 0;
-
-    if (!this.pointerLocked) {
-      movementX = event.screenX - previousMouseEvent.screenX;
-      movementY = event.screenY - previousMouseEvent.screenY;
-    }
-
-    this.lookVector.x += movementX;
-    this.lookVector.y += movementY;
-
-    this.previousMouseEvent = event;
-  },
-
-  onMouseDown: function (event) {
-    var canvasEl = this.el.sceneEl.canvas;
-
-    this.mouseDown = true;
-    this.previousMouseEvent = event;
-
-    if (this.data.pointerlockEnabled && !this.pointerLocked) {
-      if (canvasEl.requestPointerLock) {
-        canvasEl.requestPointerLock();
-      } else if (canvasEl.mozRequestPointerLock) {
-        canvasEl.mozRequestPointerLock();
-      }
-    }
-  },
-
-  onMouseUp: function () {
-    this.mouseDown = false;
-  },
-
-  onPointerLockChange: function () {
-    this.pointerLocked = !!(document.pointerLockElement || document.mozPointerLockElement);
-  },
-
-  onPointerLockError: function () {
-    this.pointerLocked = false;
-  }
-};
-
-},{}],16:[function(require,module,exports){
-module.exports = {
-  schema: {
-    enabled: { default: true }
-  },
-
-  init: function () {
-    this.dVelocity = new THREE.Vector3();
-    this.bindMethods();
-  },
-
-  play: function () {
-    this.addEventListeners();
-  },
-
-  pause: function () {
-    this.removeEventListeners();
-    this.dVelocity.set(0, 0, 0);
-  },
-
-  remove: function () {
-    this.pause();
-  },
-
-  addEventListeners: function () {
-    var sceneEl = this.el.sceneEl;
-    var canvasEl = sceneEl.canvas;
-
-    if (!canvasEl) {
-      sceneEl.addEventListener('render-target-loaded', this.addEventListeners.bind(this));
-      return;
-    }
-
-    canvasEl.addEventListener('touchstart', this.onTouchStart);
-    canvasEl.addEventListener('touchend', this.onTouchEnd);
-  },
-
-  removeEventListeners: function () {
-    var canvasEl = this.el.sceneEl && this.sceneEl.canvas;
-    if (!canvasEl) { return; }
-
-    canvasEl.removeEventListener('touchstart', this.onTouchStart);
-    canvasEl.removeEventListener('touchend', this.onTouchEnd);
-  },
-
-  isVelocityActive: function () {
-    return this.data.enabled && this.isMoving;
-  },
-
-  getVelocityDelta: function () {
-    this.dVelocity.z = this.isMoving ? -1 : 0;
-    return this.dVelocity.clone();
-  },
-
-  bindMethods: function () {
-    this.onTouchStart = this.onTouchStart.bind(this);
-    this.onTouchEnd = this.onTouchEnd.bind(this);
-  },
-
-  onTouchStart: function (e) {
-    this.isMoving = true;
-    e.preventDefault();
-  },
-
-  onTouchEnd: function (e) {
-    this.isMoving = false;
-    e.preventDefault();
-  }
-};
-
-},{}],17:[function(require,module,exports){
-/**
- * Universal Controls
- *
- * @author Don McCurdy <dm@donmccurdy.com>
- */
-
-var COMPONENT_SUFFIX = '-controls',
-    MAX_DELTA = 0.2, // ms
-    PI_2 = Math.PI / 2;
-
-module.exports = {
-
-  /*******************************************************************
-   * Schema
-   */
-
-  dependencies: ['velocity', 'rotation'],
-
-  schema: {
-    enabled:              { default: true },
-    movementEnabled:      { default: true },
-    movementControls:     { default: ['gamepad', 'keyboard', 'touch'] },
-    rotationEnabled:      { default: true },
-    rotationControls:     { default: ['hmd', 'gamepad', 'mouse'] },
-    movementSpeed:        { default: 5 }, // m/s
-    movementEasing:       { default: 15 }, // m/s2
-    movementAcceleration: { default: 80 }, // m/s2
-    rotationSensitivity:  { default: 0.05 } // radians/frame, ish
-  },
-
-  /*******************************************************************
-   * Lifecycle
-   */
-
-  init: function () {
-    // Movement
-    this.velocity = new THREE.Vector3();
-
-    // Rotation
-    this.pitch = new THREE.Object3D();
-    this.yaw = new THREE.Object3D();
-    this.yaw.position.y = 10;
-    this.yaw.add(this.pitch);
-    this.heading = new THREE.Euler(0, 0, 0, 'YXZ');
-
-    if (this.el.sceneEl.hasLoaded) {
-      this.injectControls();
-    } else {
-      this.el.sceneEl.addEventListener('loaded', this.injectControls.bind(this));
-    }
-  },
-
-  update: function () {
-    if (this.el.sceneEl.hasLoaded) {
-      this.injectControls();
-    }
-  },
-
-  injectControls: function () {
-    var i, name,
-        data = this.data;
-
-    for (i = 0; i < data.movementControls.length; i++) {
-      name = data.movementControls[i] + COMPONENT_SUFFIX;
-      if (!this.el.components[name]) {
-        this.el.setAttribute(name, '');
-      }
-    }
-
-    for (i = 0; i < data.rotationControls.length; i++) {
-      name = data.rotationControls[i] + COMPONENT_SUFFIX;
-      if (!this.el.components[name]) {
-        this.el.setAttribute(name, '');
-      }
-    }
-  },
-
-  /*******************************************************************
-   * Tick
-   */
-
-  tick: function (t, dt) {
-    if (isNaN(dt)) { return; }
-
-    // Update rotation.
-    if (this.data.rotationEnabled) this.updateRotation(dt);
-
-    // Update velocity. If FPS is too low, reset.
-    if (this.data.movementEnabled && dt / 1000 > MAX_DELTA) {
-      this.velocity.set(0, 0, 0);
-      this.el.setAttribute('velocity', this.velocity);
-    } else {
-      this.updateVelocity(dt);
-    }
-  },
-
-  /*******************************************************************
-   * Rotation
-   */
-
-  updateRotation: function (dt) {
-    var control, dRotation,
-        data = this.data;
-
-    for (var i = 0, l = data.rotationControls.length; i < l; i++) {
-      control = this.el.components[data.rotationControls[i] + COMPONENT_SUFFIX];
-      if (control && control.isRotationActive()) {
-        if (control.getRotationDelta) {
-          dRotation = control.getRotationDelta(dt);
-          dRotation.multiplyScalar(data.rotationSensitivity);
-          this.yaw.rotation.y -= dRotation.x;
-          this.pitch.rotation.x -= dRotation.y;
-          this.pitch.rotation.x = Math.max(-PI_2, Math.min(PI_2, this.pitch.rotation.x));
-          this.el.setAttribute('rotation', {
-            x: THREE.Math.radToDeg(this.pitch.rotation.x),
-            y: THREE.Math.radToDeg(this.yaw.rotation.y),
-            z: 0
-          });
-        } else if (control.getRotation) {
-          this.el.setAttribute('rotation', control.getRotation());
-        } else {
-          throw new Error('Incompatible rotation controls: %s', data.rotationControls[i]);
-        }
-        break;
-      }
-    }
-  },
-
-  /*******************************************************************
-   * Movement
-   */
-
-  updateVelocity: function (dt) {
-    var control, velocity, dVelocity,
-        data = this.data;
-
-    if (data.movementEnabled) {
-      for (var i = 0, l = data.movementControls.length; i < l; i++) {
-        control = this.el.components[data.movementControls[i] + COMPONENT_SUFFIX];
-        if (control && control.isVelocityActive()) {
-          if (control.getVelocityDelta) {
-            dVelocity = control.getVelocityDelta(dt);
-          } else if (control.getVelocity) {
-            this.el.setAttribute('velocity', control.getVelocity());
-            return;
-          } else {
-            throw new Error('Incompatible movement controls: ', data.movementControls[i]);
-          }
-          break;
-        }
-      }
-    }
-
-    velocity = this.velocity;
-    velocity.copy(this.el.getAttribute('velocity'));
-    velocity.x -= velocity.x * data.movementEasing * dt / 1000;
-    velocity.z -= velocity.z * data.movementEasing * dt / 1000;
-
-    if (dVelocity && data.movementEnabled) {
-      // Set acceleration
-      if (dVelocity.length() > 1) {
-        dVelocity.setLength(this.data.movementAcceleration * dt / 1000);
-      } else {
-        dVelocity.multiplyScalar(this.data.movementAcceleration * dt / 1000);
-      }
-
-      // Rotate to heading
-      var rotation = this.el.getAttribute('rotation');
-      if (rotation) {
-        this.heading.set(0 /* no flying */, THREE.Math.degToRad(rotation.y), 0);
-        dVelocity.applyEuler(this.heading);
-      }
-
-      velocity.add(dVelocity);
-
-      // TODO - Several issues here:
-      // (1) Interferes w/ gravity.
-      // (2) Interferes w/ jumping.
-      // (3) Likely to interfere w/ relative position to moving platform.
-      // if (velocity.length() > data.movementSpeed) {
-      //   velocity.setLength(data.movementSpeed);
-      // }
-    }
-
-    this.el.setAttribute('velocity', velocity);
-  }
-};
-
-},{}],18:[function(require,module,exports){
-/**
- * three-model
- *
- * Wraps THREE.FBXLoader, and therefore has the same feature support:
- *
- * Loads FBX file in *ASCII and version 7 format.
- *
- * Supported
- *  - mesh
- *  - skinning
- *  - normal / uv
- *
- * Not Supported
- *  - material
- *  - texture
- *  - morph
- */
-THREE.FBXLoader = require('../../lib/FBXLoader');
-
-module.exports = {
-  schema: {src: { type: 'src' }},
-
-  init: function () {
-    this.model = null;
-  },
-
-  update: function () {
-    var loader,
-        data = this.data;
-
-    if (!data.src) return;
-
-    this.remove();
-    loader = new THREE.FBXLoader();
-    loader.load(data.src, this.load.bind(this));
-  },
-
-  load: function (model) {
-    this.model = model;
-    this.el.setObject3D('mesh', model);
-    this.el.emit('model-loaded', {format: 'fbx', model: model});
-  },
-
-  remove: function () {
-    if (this.model) this.el.removeObject3D('mesh');
-  }
-};
-
-},{"../../lib/FBXLoader":5}],19:[function(require,module,exports){
-module.exports = {
-  'fbx-model':   require('./fbx-model'),
-  'ply-model': require('./ply-model'),
-  'three-model': require('./three-model'),
-
-  registerAll: function (AFRAME) {
-    if (this._registered) return;
-
-    AFRAME = AFRAME || window.AFRAME;
-    AFRAME = AFRAME.aframeCore || AFRAME;
-    if (!AFRAME.components['fbx-model'])    AFRAME.registerComponent('fbx-model',   this['fbx-model']);
-    if (!AFRAME.components['ply-model'])    AFRAME.registerComponent('ply-model',   this['ply-model']);
-    if (!AFRAME.components['three-model'])  AFRAME.registerComponent('three-model', this['three-model']);
-
-    this._registered = true;
-  }
-};
-
-},{"./fbx-model":18,"./ply-model":20,"./three-model":21}],20:[function(require,module,exports){
-/**
- * ply-model
- *
- * Wraps THREE.PLYLoader.
- */
-THREE.PLYLoader = require('../../lib/PLYLoader');
-
-module.exports = {
-  schema: {src: { type: 'src' }},
-
-  init: function () {
-    this.model = null;
-  },
-
-  update: function () {
-    var loader,
-        data = this.data;
-
-    if (!data.src) return;
-
-    this.remove();
-    loader = new THREE.PLYLoader();
-    loader.load(data.src, this.load.bind(this));
-  },
-
-  load: function (geometry) {
-    this.model = new THREE.Mesh(geometry, new THREE.MeshPhongMaterial({
-      color: 0xFFFFFF,
-      shading: THREE.FlatShading,
-      vertexColors: THREE.VertexColors,
-      shininess: 0
-    }));
-    this.el.setObject3D('mesh', this.model);
-    this.el.emit('model-loaded', {format: 'ply', model: this.model});
-  },
-
-  remove: function () {
-    if (this.model) this.el.removeObject3D('mesh');
-  }
-};
-
-},{"../../lib/PLYLoader":8}],21:[function(require,module,exports){
-/**
- * three-model
- *
- * Loader for THREE.js JSON format. Somewhat confusingly, there are two
- * different THREE.js formats, both having the .json extension. This loader
- * supports both, but requires you to specify the mode as "object" or "json".
- *
- * Typically, you will use "json" for a single mesh, and "object" for a scene
- * or multiple meshes. Check the console for errors, if in doubt.
- *
- * See: https://clara.io/learn/user-guide/data_exchange/threejs_export
- */
-module.exports = {
-  schema: {
-    src:          { type: 'src' },
-    loader:       { default: 'object', oneOf: ['object', 'json'] },
-    animation:    { default: '' }
-  },
-
-  init: function () {
-    this.model = null;
-    this.mixer = null;
-  },
-
-  update: function () {
-    var loader,
-        data = this.data;
-    if (!data.src) return;
-
-    this.remove();
-    if (data.loader === 'object') {
-      loader = new THREE.ObjectLoader();
-      loader.load(data.src, this.load.bind(this));
-    } else if (data.loader === 'json') {
-      loader = new THREE.JSONLoader();
-      loader.load(data.src, function (geometry, materials) {
-        this.load(new THREE.Mesh(geometry, new THREE.MeshFaceMaterial(materials)));
-      }.bind(this));
-    } else {
-      throw new Error('[three-model] Invalid mode "%s".', data.mode);
-    }
-  },
-
-  load: function (model) {
-    this.model = model;
-    this.mixer = new THREE.AnimationMixer(this.model);
-    this.el.setObject3D('mesh', model);
-    this.el.emit('model-loaded', {format: 'three', model: model});
-
-    if (this.data.animation) this.playAnimation();
-  },
-
-  playAnimation: function () {
-    var data = this.data,
-        animations = this.model.animations || this.model.geometry.animations,
-        clip = THREE.AnimationClip.findByName(animations, data.animation);
-    this.model.activeAction = this.mixer.clipAction(clip, this.model).play();
-  },
-
-  remove: function () {
-    if (this.mixer) this.mixer.stopAllAction();
-    if (this.model) this.el.removeObject3D('mesh');
-  },
-
-  tick: function (t, dt) {
-    if (this.mixer && !isNaN(dt)) {
-      this.mixer.update(dt / 1000);
-    }
-  }
-};
-
-},{}],22:[function(require,module,exports){
-module.exports = {
-  'velocity':   require('./velocity'),
-  'quaternion': require('./quaternion'),
-
-  registerAll: function (AFRAME) {
-    if (this._registered) return;
-
-    AFRAME = AFRAME || window.AFRAME;
-    AFRAME = AFRAME.aframeCore || AFRAME;
-    if (!AFRAME.components['velocity'])    AFRAME.registerComponent('velocity',   this.velocity);
-    if (!AFRAME.components['quaternion'])  AFRAME.registerComponent('quaternion', this.quaternion);
-
-    this._registered = true;
-  }
-};
-
-},{"./quaternion":23,"./velocity":24}],23:[function(require,module,exports){
-/**
- * Quaternion.
- *
- * Represents orientation of object in three dimensions. Similar to `rotation`
- * component, but avoids problems of gimbal lock.
- *
- * See: https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
- */
-module.exports = {
-  schema: {type: 'vec4'},
-  tick: function () {
-    var data = this.data;
-    this.el.object3D.quaternion.set(data.x, data.y, data.z, data.w);
-  }
-};
-
-},{}],24:[function(require,module,exports){
-/**
- * Velocity, in m/s.
- */
-module.exports = {
-  schema: {type: 'vec3'},
-
-  init: function () {
-    this.system = this.el.sceneEl.systems.physics;
-
-    if (this.system) {
-      this.system.addBehavior(this, this.system.Phase.RENDER);
-    }
-  },
-
-  remove: function () {
-    if (this.system) {
-      this.system.removeBehavior(this, this.system.Phase.RENDER);
-    }
-  },
-
-  tick: function (t, dt) {
-    if (isNaN(dt)) return;
-    if (this.system) return;
-    this.step(t, dt);
-  },
-
-  step: function (t, dt) {
-    if (isNaN(dt)) return;
-
-    var physics = this.el.sceneEl.systems.physics || {options:{maxInterval: 1 / 60}},
-
-        // TODO - There's definitely a bug with getComputedAttribute and el.data.
-        velocity = this.el.getAttribute('velocity') || {x: 0, y: 0, z: 0},
-        position = this.el.getAttribute('position') || {x: 0, y: 0, z: 0};
-
-    dt = Math.min(dt, physics.options.maxInterval * 1000);
-
-    this.el.setAttribute('position', {
-      x: position.x + velocity.x * dt / 1000,
-      y: position.y + velocity.y * dt / 1000,
-      z: position.z + velocity.z * dt / 1000
-    });
-  }
-};
-
-},{}],25:[function(require,module,exports){
-module.exports = {
-  schema: {
-    defaultRotation: {type: 'vec3'},
-    enableDefaultRotation: {default: false}
-  },
-
-  init: function () {
-    this.active = false;
-    this.targetEl = null;
-    this.fire = this.fire.bind(this);
-  },
-
-  play: function () { this.el.addEventListener('click', this.fire); },
-  pause: function () { this.el.addEventListener('click', this.fire); },
-  remove: function () { this.pause(); },
-
-  fire: function () {
-    var targetEl = this.el.sceneEl.querySelector('[checkpoint-controls]');
-    if (!targetEl) {
-      throw new Error('No `checkpoint-controls` component found.');
-    }
-    targetEl.components['checkpoint-controls'].setCheckpoint(this.el);
-  }
-};
-
-},{}],26:[function(require,module,exports){
-var math = require('../math'),
-    physics = require('../physics');
-
-module.exports = {
-  'checkpoint':      require('./checkpoint'),
-  'jump-ability':      require('./jump-ability'),
-  'toggle-velocity':   require('./toggle-velocity'),
-
-  registerAll: function (AFRAME) {
-    if (this._registered) return;
-
-    AFRAME = AFRAME || window.AFRAME;
-    AFRAME = AFRAME.aframeCore || AFRAME;
-
-    math.registerAll();
-    physics.registerAll();
-    if (!AFRAME.components['checkpoint'])       AFRAME.registerComponent('checkpoint',        this['checkpoint']);
-    if (!AFRAME.components['jump-ability'])     AFRAME.registerComponent('jump-ability',      this['jump-ability']);
-    if (!AFRAME.components['toggle-velocity'])  AFRAME.registerComponent('toggle-velocity',   this['toggle-velocity']);
-
-    this._registered = true;
-  }
-};
-
-},{"../math":22,"../physics":31,"./checkpoint":25,"./jump-ability":27,"./toggle-velocity":28}],27:[function(require,module,exports){
-var ACCEL_G = -9.8, // m/s^2
-    EASING = -15; // m/s^2
-
-/**
- * Jump ability.
- */
-module.exports = {
-  dependencies: ['velocity'],
-
-  /* Schema
-  ——————————————————————————————————————————————*/
-
-  schema: {
-    on: { default: 'keydown:Space gamepadbuttondown:0' },
-    playerHeight: { default: 1.764 },
-    enableDoubleJump: { default: false },
-    distance: { default: 5 },
-    soundJump: { default: '' },
-    soundLand: { default: '' },
-    debug: { default: false }
-  },
-
-  init: function () {
-    this.isOnObject = true;
-    this.velocity = 0;
-    this.numJumps = 0;
-
-    var beginJump = this.beginJump.bind(this),
-        events = this.data.on.split(' ');
-    this.bindings = {};
-    for (var i = 0; i <  events.length; i++) {
-      this.bindings[events[i]] = beginJump;
-      this.el.addEventListener(events[i], beginJump);
-    }
-  },
-
-  remove: function () {
-    for (var event in this.bindings) {
-      if (this.bindings.hasOwnProperty(event)) {
-        this.el.removeEventListener(event, this.bindings[event]);
-        delete this.bindings[event];
-      }
-    }
-  },
-
-  beginJump: function () {
-    if (this.isOnObject || this.data.enableDoubleJump && this.numJumps === 1) {
-      var data = this.data,
-          initialVelocity = Math.sqrt(-2 * data.distance * (ACCEL_G + EASING)),
-          v = this.el.getAttribute('velocity');
-      this.el.setAttribute('velocity', {x: v.x, y: initialVelocity, z: v.z});
-      this.numJumps++;
-    }
-  }
-};
-
-},{}],28:[function(require,module,exports){
-/**
- * Toggle velocity.
- *
- * Moves an object back and forth along an axis, within a min/max extent.
- */
-module.exports = {
-  dependencies: ['velocity'],
-  schema: {
-    axis: { default: 'x', oneOf: ['x', 'y', 'z'] },
-    min: { default: 0 },
-    max: { default: 0 },
-    speed: { default: 1 }
-  },
-  init: function () {
-    var velocity = {x: 0, y: 0, z: 0};
-    velocity[this.data.axis] = this.data.speed;
-    this.el.setAttribute('velocity', velocity);
-
-    if (this.el.sceneEl.addBehavior) this.el.sceneEl.addBehavior(this);
-  },
-  remove: function () {},
-  update: function () { this.tick(); },
-  tick: function () {
-    var data = this.data,
-        velocity = this.el.getAttribute('velocity'),
-        position = this.el.getAttribute('position');
-    if (velocity[data.axis] > 0 && position[data.axis] > data.max) {
-      velocity[data.axis] = -data.speed;
-      this.el.setAttribute('velocity', velocity);
-    } else if (velocity[data.axis] < 0 && position[data.axis] < data.min) {
-      velocity[data.axis] = data.speed;
-      this.el.setAttribute('velocity', velocity);
-    }
-  },
-};
-
-},{}],29:[function(require,module,exports){
-var CANNON = require('cannon'),
-    mesh2shape = require('../../lib/CANNON-mesh2shape');
-
-require('../../lib/CANNON-shape2mesh');
-
-module.exports = {
-  dependencies: ['position'],
-
-  init: function () {
-    this.initBody();
-  },
-
-  initBody: function () {
-    this.system = this.el.sceneEl.systems.physics;
-    this.system.addBehavior(this, this.system.Phase.SIMULATE);
-
-    var shape, options;
-
-    if (this.data.shape !== 'auto') {
-      options = {
-        type: mesh2shape.Type[this.data.shape.toUpperCase()]
-      };
-    }
-
-    // TODO - This is pretty obtuse. There really ought to be a clean way to
-    // delay component initialization until the scene and all of its components
-    // have been taken care of.
-    shape = mesh2shape(this.el.object3D, options);
-    if (shape && this.el.sceneEl.hasLoaded) {
-      this.initBody_(shape);
-    } else if (shape && !this.el.sceneEl.hasLoaded) {
-      this.el.sceneEl.addEventListener('loaded', this.initBody_.bind(this, shape));
-    } else if (!this.el.sceneEl.hasLoaded) {
-      this.el.sceneEl.addEventListener('loaded', function () {
-        shape = mesh2shape(this.el.object3D, options);
-        if (shape) {
-          this.initBody_(shape);
-        } else {
-          this.el.addEventListener('model-loaded', function (e) {
-            this.initBody_(mesh2shape(e.detail.model, options));
-          }.bind(this));
-        }
-      }.bind(this));
-    } else {
-      this.el.addEventListener('model-loaded', function (e) {
-        this.initBody_(mesh2shape(e.detail.model, options));
-      }.bind(this));
-    }
-  },
-
-  initBody_: function (shape) {
-    var el = this.el,
-        data = this.data,
-        pos = el.getAttribute('position');
-
-    if (!pos) {
-      pos = {x: 0, y: 0, z: 0};
-      el.setAttribute('position', pos);
-    }
-
-    // Apply scaling
-    if (this.el.hasAttribute('scale')) {
-      if (shape.setScale) {
-        shape.setScale(this.el.getAttribute('scale'));
-      } else {
-        console.warn('Physics body scaling could not be applied.');
-      }
-    }
-
-    this.body = new CANNON.Body({
-      mass: data.mass || 0,
-      material: this.system.material,
-      position: new CANNON.Vec3(pos.x, pos.y, pos.z),
-      linearDamping: data.linearDamping,
-      angularDamping: data.angularDamping
-    });
-    this.body.addShape(shape, shape.offset, shape.orientation);
-
-    // Apply rotation
-    var rot = el.getAttribute('rotation') || {x: 0, y: 0, z: 0};
-    this.body.quaternion.setFromEuler(
-      THREE.Math.degToRad(rot.x),
-      THREE.Math.degToRad(rot.y),
-      THREE.Math.degToRad(rot.z),
-      'XYZ'
-    ).normalize();
-
-    // Show wireframe
-    if (this.system.options.debug) {
-      this.createWireframe(this.body, shape);
-    }
-
-    this.body.el = this.el;
-    this.system.addBody(this.body);
-  },
-
-  remove: function () {
-    this.system.removeBehavior(this, this.system.Phase.SIMULATE);
-    if (this.body) this.system.removeBody(this.body);
-    if (this.wireframe) this.el.sceneEl.object3D.remove(this.wireframe);
-  },
-
-  createWireframe: function (body, shape) {
-    var offset = shape.offset,
-        orientation = shape.orientation,
-        mesh = CANNON.shape2mesh(body).children[0];
-    this.wireframe = new THREE.EdgesHelper(mesh, 0xff0000);
-
-    if (offset) {
-      this.wireframe.offset = offset.clone();
-    }
-
-    if (orientation) {
-      orientation.inverse(orientation);
-      this.wireframe.orientation = new THREE.Quaternion(
-        orientation.x,
-        orientation.y,
-        orientation.z,
-        orientation.w
-      );
-    }
-
-    this.syncWireframe();
-    this.el.sceneEl.object3D.add(this.wireframe);
-  },
-
-  syncWireframe: function () {
-    var offset,
-        wireframe = this.wireframe;
-
-    if (!this.wireframe) return;
-
-    // Apply rotation. If the shape required custom orientation, also apply
-    // that on the wireframe.
-    wireframe.quaternion.copy(this.body.quaternion);
-    if (wireframe.orientation) {
-      wireframe.quaternion.multiply(wireframe.orientation);
-    }
-
-    // Apply position. If the shape required custom offset, also apply that on
-    // the wireframe.
-    wireframe.position.copy(this.body.position);
-    if (wireframe.offset) {
-      offset = wireframe.offset.clone().applyQuaternion(wireframe.quaternion);
-      wireframe.position.add(offset);
-    }
-
-    wireframe.updateMatrix();
-  }
-};
-
-},{"../../lib/CANNON-mesh2shape":3,"../../lib/CANNON-shape2mesh":4,"cannon":43}],30:[function(require,module,exports){
-var Body = require('./body');
-
-/**
- * Dynamic body.
- *
- * Moves according to physics simulation, and may collide with other objects.
- */
-module.exports = AFRAME.utils.extend({}, Body, {
-  dependencies: ['position', 'quaternion', 'velocity'],
-
-  schema: {
-    mass:           { default: 5 },
-    linearDamping:  { default: 0.01 },
-    angularDamping: { default: 0.01 },
-    shape: {default: 'auto', oneOf: ['auto', 'box']}
-  },
-
-  step: function () {
-    if (!this.body) return;
-    this.el.setAttribute('quaternion', this.body.quaternion);
-    this.el.setAttribute('position', this.body.position);
-    if (this.wireframe) this.syncWireframe();
-  }
-});
-
-},{"./body":29}],31:[function(require,module,exports){
-var math = require('../math');
-
-module.exports = {
-  'physics':        require('./physics'),
-  'dynamic-body':   require('./dynamic-body'),
-  'kinematic-body': require('./kinematic-body'),
-  'static-body':    require('./static-body'),
-  'system': {
-    'physics': require('./system/physics')
-  },
-
-  registerAll: function (AFRAME) {
-    if (this._registered) return;
-
-    AFRAME = AFRAME || window.AFRAME;
-    AFRAME = AFRAME.aframeCore || AFRAME;
-
-    math.registerAll();
-    if (!AFRAME.systems.physics)              AFRAME.registerSystem('physics', this.system.physics);
-    if (!AFRAME.components['physics'])        AFRAME.registerComponent('physics',        this['physics']);
-    if (!AFRAME.components['dynamic-body'])   AFRAME.registerComponent('dynamic-body',   this['dynamic-body']);
-    if (!AFRAME.components['kinematic-body']) AFRAME.registerComponent('kinematic-body', this['kinematic-body']);
-    if (!AFRAME.components['static-body'])    AFRAME.registerComponent('static-body',    this['static-body']);
-
-    this._registered = true;
-  }
-};
-
-},{"../math":22,"./dynamic-body":30,"./kinematic-body":32,"./physics":33,"./static-body":34,"./system/physics":35}],32:[function(require,module,exports){
-/**
- * Kinematic body.
- *
- * Managed dynamic body, which moves but is not affected (directly) by the
- * physics engine. This is not a true kinematic body, in the sense that we are
- * letting the physics engine _compute_ collisions against it and selectively
- * applying those collisions to the object. The physics engine does not decide
- * the position/velocity/rotation of the element.
- *
- * Used for the camera object, because full physics simulation would create
- * movement that feels unnatural to the player. Bipedal movement does not
- * translate nicely to rigid body physics.
- *
- * See: http://www.learn-cocos2d.com/2013/08/physics-engine-platformer-terrible-idea/
- * And: http://oxleygamedev.blogspot.com/2011/04/player-physics-part-2.html
- */
-var CANNON = require('cannon');
-
-var EPS = 0.000001;
-
-module.exports = {
-  dependencies: ['velocity'],
-
-  /*******************************************************************
-   * Schema
-   */
-
-  schema: {
-    mass:           { default: 5 },
-    radius:         { default: 1.3 },
-    height:         { default: 1.764 },
-    linearDamping:  { default: 0.05 }
-  },
-
-  /*******************************************************************
-   * Lifecycle
-   */
-
-  init: function () {
-    this.system = this.el.sceneEl.systems.physics;
-    this.system.addBehavior(this, this.system.Phase.SIMULATE);
-
-    var el = this.el,
-        data = this.data,
-        position = (new CANNON.Vec3()).copy(el.getAttribute('position'));
-
-    this.body = new CANNON.Body({
-      shape: new CANNON.Sphere(data.radius),
-      material: this.system.material,
-      position: position,
-      mass: data.mass,
-      linearDamping: data.linearDamping,
-      fixedRotation: true
-    });
-    this.body.position.y -= (data.height - data.radius); // TODO - Simplify.
-
-    this.body.el = this.el;
-    this.system.addBody(this.body);
-  },
-
-  remove: function () {
-    this.system.removeBody(this.body);
-    this.system.removeBehavior(this, this.system.Phase.SIMULATE);
-  },
-
-  /*******************************************************************
-   * Tick
-   */
-
-  /**
-   * Checks CANNON.World for collisions and attempts to apply them to the
-   * element automatically, in a player-friendly way.
-   *
-   * There's extra logic for horizontal surfaces here. The basic requirements:
-   * (1) Only apply gravity when not in contact with _any_ horizontal surface.
-   * (2) When moving, project the velocity against exactly one ground surface.
-   *     If in contact with two ground surfaces (e.g. ground + ramp), choose
-   *     the one that collides with current velocity, if any.
-   */
-  step: (function () {
-    var velocity = new THREE.Vector3(),
-        normalizedVelocity = new THREE.Vector3(),
-        currentSurfaceNormal = new THREE.Vector3(),
-        groundNormal = new THREE.Vector3();
-
-    return function (t, dt) {
-      if (isNaN(dt)) return;
-
-      var body = this.body,
-          data = this.data,
-          didCollide = false,
-          height, groundHeight = -Infinity,
-          groundBody;
-
-      dt = Math.min(dt, this.system.options.maxInterval * 1000);
-
-      groundNormal.set(0, 0, 0);
-      velocity.copy(this.el.getAttribute('velocity'));
-      body.velocity.copy(velocity);
-      body.position.copy(this.el.getAttribute('position'));
-
-      for (var i = 0, contact; (contact = this.system.world.contacts[i]); i++) {
-        // 1. Find any collisions involving this element. Get the contact
-        // normal, and make sure it's oriented _out_ of the other object.
-        if (body.id === contact.bi.id) {
-          contact.ni.negate(currentSurfaceNormal);
-        } else if (body.id === contact.bj.id) {
-          currentSurfaceNormal.copy(contact.ni);
-        } else {
-          continue;
-        }
-
-        didCollide = body.velocity.dot(currentSurfaceNormal) < -EPS;
-        if (didCollide && currentSurfaceNormal.y <= 0.5) {
-          // 2. If current trajectory attempts to move _through_ another
-          // object, project the velocity against the collision plane to
-          // prevent passing through.
-          velocity = velocity.projectOnPlane(currentSurfaceNormal);
-        } else if (currentSurfaceNormal.y > 0.5) {
-          // 3. If in contact with something roughly horizontal (+/- 45º) then
-          // consider that the current ground. Only the highest qualifying
-          // ground is retained.
-          height = body.id === contact.bi.id
-            ? Math.abs(contact.rj.y + contact.bj.position.y)
-            : Math.abs(contact.ri.y + contact.bi.position.y);
-          if (height > groundHeight) {
-            groundHeight = height;
-            groundNormal.copy(currentSurfaceNormal);
-            groundBody = body.id === contact.bi.id ? contact.bj : contact.bi;
-          }
-        }
-      }
-
-      normalizedVelocity.copy(velocity).normalize();
-      if (groundBody && normalizedVelocity.y < 0.5) {
-        // 4. Project trajectory onto the top-most ground object, unless
-        // trajectory is > 45º.
-        velocity = velocity.projectOnPlane(groundNormal);
-      } else {
-        // 5. If not in contact with anything horizontal, apply world gravity.
-        // TODO - Why is the 4x scalar necessary.
-        velocity.add(this.system.world.gravity.scale(dt * 4.0 / 1000));
-      }
-
-      // 6. If the ground surface has a velocity, apply it directly to current
-      // position, not velocity, to preserve relative velocity.
-      if (groundBody && groundBody.el && groundBody.el.components.velocity) {
-        var groundVelocity = groundBody.el.getAttribute('velocity');
-        body.position.copy({
-          x: body.position.x + groundVelocity.x * dt / 1000,
-          y: body.position.y + groundVelocity.y * dt / 1000,
-          z: body.position.z + groundVelocity.z * dt / 1000
-        });
-        this.el.setAttribute('position', body.position);
-      }
-
-      body.position.y -= (data.height - data.radius); // TODO - Simplify.
-      body.velocity.copy(velocity);
-      this.el.setAttribute('velocity', velocity);
-    };
-  }())
-};
-
-},{"cannon":43}],33:[function(require,module,exports){
-
-
-module.exports = {
-  schema: {
-    friction:     { default: 0.01 },
-    restitution:  { default: 0.3 },
-    iterations:   { default: 5 },
-    gravity:      { default: -9.8 },
-
-    // Never step more than four frames at once. Effectively pauses the scene
-    // when out of focus, and prevents weird "jumps" when focus returns.
-    maxInterval:      { default: 4 / 60 },
-
-    // If true, show wireframes around physics bodies.
-    debug:        { default: false }
-  },
-
-  update: function (previousData) {
-    var data = this.data;
-    for (var opt in data) {
-      if (!previousData || data[opt] !== previousData[opt]) {
-        this.system.setOption(opt, data[opt]);
-      }
-    }
-  }
-};
-
-},{}],34:[function(require,module,exports){
-var Body = require('./body');
-
-/**
- * Static body.
- *
- * Solid body with a fixed position. Unaffected by gravity and collisions, but
- * other objects may collide with it.
- */
-module.exports = AFRAME.utils.extend({}, Body, {
-  schema: {
-    shape: {default: 'auto', oneOf: ['auto', 'box']}
-  },
-  step: function () {
-    if (!this.body) return;
-    if (this.el.components.velocity) this.body.velocity.copy(this.el.getAttribute('velocity'));
-    if (this.el.components.position) this.body.position.copy(this.el.getAttribute('position'));
-    if (this.wireframe) this.syncWireframe();
-  }
-});
-
-},{"./body":29}],35:[function(require,module,exports){
-var CANNON = require('cannon');
-
-var OPTIONS = {
-  friction:     0.01,
-  restitution:  0.3,
-  iterations:   5,
-  gravity:      -9.8,
-
-  // Never step more than four frames at once. Effectively pauses the scene
-  // when out of focus, and prevents weird "jumps" when focus returns.
-  maxInterval:  4 / 60,
-
-  // If true, show wireframes around physics bodies.
-  debug:        false
-};
-
-/**
- * Physics system.
- */
-module.exports = {
-  /**
-   * Update phases, used to separate physics simulation from updates to A-Frame scene.
-   * @enum {string}
-   */
-  Phase: {
-    SIMULATE: 'sim',
-    RENDER:   'render'
-  },
-
-  /**
-   * Initializes the physics system.
-   */
-  init: function () {
-    this.options = AFRAME.utils.extend({}, OPTIONS);
-
-    this.children = {};
-    this.children[this.Phase.SIMULATE] = [];
-    this.children[this.Phase.RENDER] = [];
-
-    this.listeners = {};
-
-    this.world = new CANNON.World();
-    this.world.quatNormalizeSkip = 0;
-    this.world.quatNormalizeFast = false;
-    // this.world.solver.setSpookParams(300,10);
-    this.world.solver.iterations = this.options.iterations;
-    this.world.gravity.set(0, this.options.gravity, 0);
-    this.world.broadphase = new CANNON.NaiveBroadphase();
-
-    this.material = new CANNON.Material('slipperyMaterial');
-    this.contactMaterial = new CANNON.ContactMaterial(this.material, this.material, {
-        friction: this.options.friction,
-        restitution: this.options.restitution
-    });
-    this.world.addContactMaterial(this.contactMaterial);
-  },
-
-  /**
-   * Sets an option on the physics system, affecting future simulation steps.
-   * @param {string} opt
-   * @param {mixed} value
-   */
-  setOption: function (opt, value) {
-    this.options[opt] = value;
-    switch (opt) {
-      case 'maxInterval':
-        break; // no-op
-      case 'friction':
-      case 'restitution':
-      case 'iterations':
-      case 'gravity':
-      case 'debug':
-        console.warn('Option "%s" cannot yet be dynamically updated.', opt);
-        break;
-      default:
-        console.error('Option "%s" not recognized.', opt);
-    }
-  },
-
-  /**
-   * Updates the physics world on each tick of the A-Frame scene. It would be
-   * entirely possible to separate the two – updating physics more or less
-   * frequently than the scene – if greater precision or performance were
-   * necessary.
-   * @param  {number} t
-   * @param  {number} dt
-   */
-  tick: function (t, dt) {
-    if (isNaN(dt)) return;
-
-    this.world.step(Math.min(dt / 1000, this.options.maxInterval));
-
-    var i;
-    for (i = 0; i < this.children[this.Phase.SIMULATE].length; i++) {
-      this.children[this.Phase.SIMULATE][i].step(t, dt);
-    }
-
-    for (i = 0; i < this.children[this.Phase.RENDER].length; i++) {
-      this.children[this.Phase.RENDER][i].step(t, dt);
-    }
-  },
-
-  /**
-   * Adds a body to the scene, and binds collision events to the element.
-   * @param {CANNON.Body} body
-   */
-  addBody: function (body) {
-    this.listeners[body.id] = function (e) { body.el.emit('collide', e); };
-    body.addEventListener('collide', this.listeners[body.id]);
-    this.world.addBody(body);
-  },
-
-  /**
-   * Removes a body, and its listeners, from the scene.
-   * @param {CANNON.Body} body
-   */
-  removeBody: function (body) {
-    body.addEventListener('collide', this.listeners[body.id]);
-    delete this.listeners[body.id];
-    this.world.removeBody(body);
-  },
-
-  /**
-   * Adds a component instance to the system, to be invoked on each tick during
-   * the given phase.
-   * @param {Component} component
-   * @param {string} phase
-   */
-  addBehavior: function (component, phase) {
-    this.children[phase].push(component);
-  },
-
-  /**
-   * Removes a component instance from the system.
-   * @param {Component} component
-   * @param {string} phase
-   */
-  removeBehavior: function (component, phase) {
-    this.children[phase].splice(this.children[phase].indexOf(component), 1);
-  }
-};
-
-},{"cannon":43}],36:[function(require,module,exports){
-/**
- * Flat grid.
- *
- * Defaults to 75x75.
- */
-module.exports = {
-  defaultAttributes: {
-    geometry: {
-      primitive: 'plane',
-      width: 75,
-      height: 75
-    },
-    rotation: {x: -90, y: 0, z: 0},
-    material: {
-      src: 'url(../../assets/grid.png)',
-      repeat: '75 75'
-    }
-  },
-  mappings: {
-    width: 'geometry.width',
-    depth: 'geometry.depth',
-    src: 'material.src'
-  }
-};
-
-},{}],37:[function(require,module,exports){
-/**
- * Flat-shaded ocean primitive.
- *
- * Based on a Codrops tutorial:
- * http://tympanus.net/codrops/2016/04/26/the-aviator-animating-basic-3d-scene-threejs/
- */
-module.exports.Primitive = {
-  defaultAttributes: {
-    ocean: {},
-    rotation: {x: -90, y: 0, z: 0}
-  },
-  mappings: {
-    width: 'ocean.width',
-    depth: 'ocean.depth',
-    density: 'ocean.density',
-    color: 'ocean.color',
-    opacity: 'ocean.opacity'
-  }
-};
-
-module.exports.Component = {
-  schema: {
-    // Dimensions of the ocean area.
-    width: {default: 10, min: 0},
-    depth: {default: 10, min: 0},
-
-    // Density of waves.
-    density: {default: 10},
-
-    // Wave amplitude and variance.
-    amplitude: {default: 0.1},
-    amplitudeVariance: {default: 0.3},
-
-    // Wave speed and variance.
-    speed: {default: 1},
-    speedVariance: {default: 2},
-
-    // Material.
-    color: {default: 0x7AD2F7},
-    opacity: {default: 0.8}
-  },
-
-  init: function () {
-    var el = this.el,
-        data = this.data,
-        material = el.components.material;
-
-    var geometry = new THREE.PlaneGeometry(data.width, data.depth, data.density, data.density);
-    geometry.mergeVertices();
-    this.waves = [];
-    for (var v, i = 0, l = geometry.vertices.length; i < l; i++) {
-      v = geometry.vertices[i];
-      this.waves.push({
-        z: v.z,
-        ang: Math.random() * Math.PI * 2,
-        amp: data.amplitude + Math.random() * data.amplitudeVariance,
-        speed: (data.speed + Math.random() * data.speedVariance) / 1000 // radians / frame
-      });
-    }
-
-    if (!material) {
-      material = {};
-      material.material = new THREE.MeshPhongMaterial({
-        color: data.color,
-        transparent: data.opacity < 1,
-        opacity: data.opacity,
-        shading: THREE.FlatShading,
-      });
-    }
-
-    this.mesh = new THREE.Mesh(geometry, material.material);
-    el.object3D.add(this.mesh);
-  },
-
-  remove: function () {
-    this.el.object3D.remove(this.mesh);
-  },
-
-  tick: function (t, dt) {
-    if (isNaN(dt)) return;
-
-    var verts = this.mesh.geometry.vertices;
-    for (var v, vprops, i = 0; (v = verts[i]); i++){
-      vprops = this.waves[i];
-      v.z = vprops.z + Math.sin(vprops.ang) * vprops.amp;
-      vprops.ang += vprops.speed * dt;
-    }
-    this.mesh.geometry.verticesNeedUpdate = true;
-  }
-};
-
-},{}],38:[function(require,module,exports){
-/**
- * Flat-shaded ocean primitive.
- *
- * Based on a Codrops tutorial:
- * http://tympanus.net/codrops/2016/04/26/the-aviator-animating-basic-3d-scene-threejs/
- */
-module.exports.Primitive = {
-  defaultAttributes: {
-    tube:           {},
-  },
-  mappings: {
-    path:           'tube.path',
-    segments:       'tube.segments',
-    radius:         'tube.radius',
-    radialSegments: 'tube.radialSegments',
-    closed:         'tube.closed'
-  }
-};
-
-module.exports.Component = {
-  schema: {
-    path:           {default: []},
-    segments:       {default: 64},
-    radius:         {default: 1},
-    radialSegments: {default: 8},
-    closed:         {default: false}
-  },
-
-  init: function () {
-    var el = this.el,
-        data = this.data,
-        material = el.components.material;
-
-    if (!data.path.length) {
-      console.error('[a-tube] `path` property expected but not found.');
-      return;
-    }
-
-    var curve = new THREE.CatmullRomCurve3(data.path.map(function (point) {
-      point = point.split(' ');
-      return new THREE.Vector3(Number(point[0]), Number(point[1]), Number(point[2]));
-    }));
-    var geometry = new THREE.TubeGeometry(
-      curve, data.segments, data.radius, data.radialSegments, data.closed
-    );
-
-    if (!material) {
-      material = {};
-      material.material = new THREE.MeshPhongMaterial();
-    }
-
-    this.mesh = new THREE.Mesh(geometry, material.material);
-    this.el.setObject3D('mesh', this.mesh);
-  },
-
-  remove: function () {
-    if (this.mesh) this.el.removeObject3D('mesh');
-  }
-};
-
-},{}],39:[function(require,module,exports){
-module.exports = {
-  'a-grid':        require('./a-grid'),
-  'a-ocean':        require('./a-ocean'),
-  'a-tube':        require('./a-tube'),
-
-  registerAll: function (AFRAME) {
-    if (this._registered) return;
-
-    AFRAME = AFRAME || window.AFRAME;
-    AFRAME = AFRAME.aframeCore || AFRAME;
-
-    AFRAME.registerPrimitive('a-grid',  this['a-grid']);
-
-    AFRAME.registerComponent('ocean', this['a-ocean'].Component);
-    AFRAME.registerPrimitive('a-ocean', this['a-ocean'].Primitive);
-
-    AFRAME.registerComponent('tube', this['a-tube'].Component);
-    AFRAME.registerPrimitive('a-tube', this['a-tube'].Primitive);
-
-    this._registered = true;
-  }
-};
-
-},{"./a-grid":36,"./a-ocean":37,"./a-tube":38}],40:[function(require,module,exports){
-module.exports = {
-  'shadow':       require('./shadow'),
-  'shadow-light': require('./shadow-light'),
-
-  registerAll: function (AFRAME) {
-    if (this._registered) return;
-
-    AFRAME = AFRAME || window.AFRAME;
-    AFRAME = AFRAME.aframeCore || AFRAME;
-    if (!AFRAME.components['shadow'])       AFRAME.registerComponent('shadow',        this['shadow']);
-    if (!AFRAME.components['shadow-light']) AFRAME.registerComponent('shadow-light',  this['shadow-light']);
-
-    this._registered = true;
-  }
-};
-
-},{"./shadow":42,"./shadow-light":41}],41:[function(require,module,exports){
-/**
- * Light component.
- *
- * Source: https://github.com/aframevr/aframe-core/pull/348
- *
- * @namespace light
- * @param {number} [angle=PI / 3] - Maximum extent of light from its direction,
-          in radians. For spot lights.
- * @param {bool} [cast=false] - Whether light will cast shadows.
-          Only applies to directional, point, and spot lights.
- * @param {string} [color=#FFF] - Light color. For every light.
- * @param {number} [decay=1] - Amount the light dims along the distance of the
-          light. For point and spot lights.
- * @param {number} [exponent=10.0] - Rapidity of falloff of light from its
-          target direction. For spot lights.
- * @param {string} [groundColor=#FFF] - Ground light color.
-          For hemisphere lights.
- * @param {number} [intensity=1.0] - Light strength.
-          For every light except ambient.
- * @param {number} [shadowBias=0] - How much to add or subtract from the
-          normalized depth when deciding whether a surface is in shadow.
- * @param {number} [shadowCameraFar=5000] - Orthographic shadow camera frustum
-          parameter.
- * @param {number} [shadowCameraNear=50] - Orthographic shadow camera frustum
-          parameter.
- * @param {number} [shadowDarkness=0.5] - Darkness of shadow cast, from 0 to 1.
- * @param {number} [shadowMapHeight=512] - Shadow map texture height in pixels.
- * @param {number} [shadowMapWidth=512] - Shadow map texture height in pixels.
- * @param {string} [type=directional] - Light type (i.e., ambient, directional,
-          hemisphere, point, spot).
- */
-module.exports = {
-  schema: {
-      angle:            { default: Math.PI / 3 },
-      castShadow:       { default: false },
-      color:            { default: '#FFF' },
-      groundColor:      { default: '#FFF' },
-      decay:            { default: 1 },
-      distance:         { default: 0.0 },
-      exponent:         { default: 10.0 },
-      intensity:        { default: 1.0 },
-      shadowBias:       { default: 0 },
-      shadowCameraFar:  { default: 5000 },
-      shadowCameraFov:  { default: 50 },
-      shadowCameraNear: { default: 50 },
-      shadowDarkness:   { default: 0.5 },
-      shadowMapHeight:  { default: 512 },
-      shadowMapWidth:   { default: 512 },
-      type:             { default: 'directional' }
-  },
-
-  init: function () {
-    var el = this.el;
-    this.light = this.getLight();
-    el.object3D.add(this.light);
-    el.sceneEl.registerLight(el);
-
-    if (!el.sceneEl.renderer.shadowMap.enabled) {
-      el.sceneEl.renderer.shadowMap.enabled = true;
-    }
-  },
-
-  update: function (previousData) {
-    // TODO: This check won't be necessary after v0.2.0.
-    if (previousData) {
-      var el = this.el;
-      el.object3D.remove(this.light);
-      this.light = this.getLight();
-      el.object3D.add(this.light);
-    }
-  },
-
-  tick: function () {},
-
-  remove: function () {},
-
-  /**
-   * Creates a new three.js light object given the current attributes of the
-   * component.
-   *
-   * @namespace light
-   */
-  getLight: function () {
-    var data = this.data;
-    var color = new THREE.Color(data.color).getHex();
-    var intensity = data.intensity;
-    var type = data.type;
-
-    if (type) {
-      type = type.toLowerCase();
-    }
-    switch (type) {
-      case 'ambient': {
-        return new THREE.AmbientLight(color);
-      }
-      case 'directional': {
-        return this.setShadow(new THREE.DirectionalLight(color, intensity));
-      }
-      case 'hemisphere': {
-        return new THREE.HemisphereLight(color, data.groundColor,
-                                         intensity);
-      }
-      case 'point': {
-        return this.setShadow(
-          new THREE.PointLight(color, intensity, data.distance, data.decay));
-      }
-      case 'spot': {
-        return this.setShadow(
-          new THREE.SpotLight(color, intensity, data.distance, data.angle,
-                              data.exponent, data.decay));
-      }
-      default: {
-        return new THREE.AmbientLight(color);
-      }
-    }
-  },
-
-  /**
-   * Copy over shadow-related data from the component onto the light.
-   *
-   * @param {object} light
-   */
-  setShadow: function (light) {
-    var data = this.data;
-    if (!this.data.castShadow) { return light; }
-    [
-      'castShadow',
-      'shadowCameraNear',
-      'shadowCameraFar',
-      'shadowCameraFov',
-      'shadowDarkness',
-      'shadowMapHeight',
-      'shadowMapWidth'
-    ].forEach(function (shadowAttr) {
-      light[shadowAttr] = data[shadowAttr];
-    });
-    return light;
-  }
-};
-
-},{}],42:[function(require,module,exports){
-/**
- * Shadow component.
- *
- * Source: https://github.com/aframevr/aframe-core/pull/348
- *
- * @namespace shadow
- * @param {bool} [cast=false] - whether object will cast shadows.
- * @param {bool} [receive=false] - whether object will receive shadows.
- */
-module.exports = {
-  schema: {
-    cast:     { default: false },
-    receive:  { default: false }
-  },
-
-  init: function () {
-    this.update({});
-    this.el.addEventListener('model-loaded', this.update.bind(this, {}, 'foobar'));
-  },
-
-  tick: function () {},
-
-  update: function (previousData) {
-    // TODO: This check won't be necessary after v0.2.0.
-    if (previousData) {
-      var data = this.data;
-
-      // Applied recursively to support imported models.
-      this.el.object3D.traverse(function(node) {
-        if (node instanceof THREE.Mesh) {
-          node.castShadow = data.cast;
-          node.receiveShadow = data.receive;
-        }
-      });
-    }
-  },
-
-  remove: function () {}
-};
-
-},{}],43:[function(require,module,exports){
 (function (global){
 /*
  * Copyright (c) 2015 cannon.js Authors
@@ -20475,9 +18650,2483 @@ World.prototype.clearForces = function(){
 (2)
 });
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],44:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
+var EPS = 0.1;
+
+module.exports = {
+  schema: {
+    enabled: {default: true},
+    mode: {default: 'teleport', oneOf: ['teleport', 'animate']},
+    animateSpeed: {default: 3.0}
+  },
+
+  init: function () {
+    this.active = true;
+    this.checkpoint = null;
+
+    this.offset = new THREE.Vector3();
+    this.position = new THREE.Vector3();
+    this.targetPosition = new THREE.Vector3();
+  },
+
+  play: function () { this.active = true; },
+  pause: function () { this.active = false; },
+
+  setCheckpoint: function (checkpoint) {
+    if (!this.active) return;
+
+    this.checkpoint = checkpoint;
+    if (this.data.mode === 'teleport') {
+      this.sync();
+      this.el.setAttribute('position', this.targetPosition);
+    }
+  },
+
+  isVelocityActive: function () {
+    return !!(this.active && this.checkpoint);
+  },
+
+  getVelocity: function () {
+    if (!this.active) return;
+
+    var data = this.data,
+        offset = this.offset,
+        position = this.position,
+        targetPosition = this.targetPosition;
+
+    this.sync();
+    if (position.distanceTo(targetPosition) < EPS) {
+      this.checkpoint = null;
+      return offset.set(0, 0, 0);
+    }
+    offset.setLength(data.animateSpeed);
+    return offset;
+  },
+
+  sync: function () {
+    var offset = this.offset,
+        position = this.position,
+        targetPosition = this.targetPosition;
+
+    position.copy(this.el.getComputedAttribute('position'));
+    targetPosition.copy(this.checkpoint.getComputedAttribute('position'));
+    // TODO - Cleverer ways around this?
+    targetPosition.y = position.y;
+    offset.copy(targetPosition).sub(position);
+  }
+};
+
+},{}],13:[function(require,module,exports){
+/**
+ * Gamepad controls for A-Frame.
+ *
+ * Stripped-down version of: https://github.com/donmccurdy/aframe-gamepad-controls
+ *
+ * For more information about the Gamepad API, see:
+ * https://developer.mozilla.org/en-US/docs/Web/API/Gamepad_API/Using_the_Gamepad_API
+ */
+
+var GamepadButton = require('../../lib/GamepadButton'),
+    GamepadButtonEvent = require('../../lib/GamepadButtonEvent');
+
+var JOYSTICK_EPS = 0.2;
+
+module.exports = {
+
+  /*******************************************************************
+   * Statics
+   */
+
+  GamepadButton: GamepadButton,
+
+  /*******************************************************************
+   * Schema
+   */
+
+  schema: {
+    // Controller 0-3
+    controller:        { default: 0, oneOf: [0, 1, 2, 3] },
+
+    // Enable/disable features
+    enabled:           { default: true },
+
+    // Debugging
+    debug:             { default: false }
+  },
+
+  /*******************************************************************
+   * Core
+   */
+
+  /**
+   * Called once when component is attached. Generally for initial setup.
+   */
+  init: function () {
+    var scene = this.el.sceneEl;
+    this.prevTime = window.performance.now();
+
+    // Button state
+    this.buttons = {};
+
+    scene.addBehavior(this);
+
+    if (!this.getGamepad()) {
+      console.warn(
+        'Gamepad #%d not found. Connect controller and press any button to continue.',
+        this.data.controller
+      );
+    }
+  },
+
+  /**
+   * Called when component is attached and when component data changes.
+   * Generally modifies the entity based on the data.
+   */
+  update: function () { this.tick(); },
+
+  /**
+   * Called on each iteration of main render loop.
+   */
+  tick: function () {
+    this.updateButtonState();
+  },
+
+  /**
+   * Called when a component is removed (e.g., via removeAttribute).
+   * Generally undoes all modifications to the entity.
+   */
+  remove: function () { },
+
+  /*******************************************************************
+   * Universal controls - movement
+   */
+
+  isVelocityActive: function () {
+    if (!this.data.enabled || !this.isConnected()) return false;
+
+    var dpad = this.getDpad(),
+        joystick0 = this.getJoystick(0),
+        inputX = dpad.x || joystick0.x,
+        inputY = dpad.y || joystick0.y;
+
+    return Math.abs(inputX) > JOYSTICK_EPS || Math.abs(inputY) > JOYSTICK_EPS;
+  },
+
+  getVelocityDelta: function () {
+    var dpad = this.getDpad(),
+        joystick0 = this.getJoystick(0),
+        inputX = dpad.x || joystick0.x,
+        inputY = dpad.y || joystick0.y,
+        dVelocity = new THREE.Vector3();
+
+    if (Math.abs(inputX) > JOYSTICK_EPS) {
+      dVelocity.x += inputX;
+    }
+    if (Math.abs(inputY) > JOYSTICK_EPS) {
+      dVelocity.z += inputY;
+    }
+
+    return dVelocity;
+  },
+
+  /*******************************************************************
+   * Universal controls - rotation
+   */
+
+  isRotationActive: function () {
+    if (!this.data.enabled || !this.isConnected()) return false;
+
+    var joystick1 = this.getJoystick(1);
+
+    return Math.abs(joystick1.x) > JOYSTICK_EPS || Math.abs(joystick1.y) > JOYSTICK_EPS;
+  },
+
+  getRotationDelta: function () {
+    var lookVector = this.getJoystick(1);
+    if (Math.abs(lookVector.x) <= JOYSTICK_EPS) lookVector.x = 0;
+    if (Math.abs(lookVector.y) <= JOYSTICK_EPS) lookVector.y = 0;
+    return lookVector;
+  },
+
+  /*******************************************************************
+   * Button events
+   */
+
+  updateButtonState: function () {
+    var gamepad = this.getGamepad();
+    if (this.data.enabled && gamepad) {
+
+      // Fire DOM events for button state changes.
+      for (var i = 0; i < gamepad.buttons.length; i++) {
+        if (gamepad.buttons[i].pressed && !this.buttons[i]) {
+          this.emit(new GamepadButtonEvent('gamepadbuttondown', i, gamepad.buttons[i]));
+        } else if (!gamepad.buttons[i].pressed && this.buttons[i]) {
+          this.emit(new GamepadButtonEvent('gamepadbuttonup', i, gamepad.buttons[i]));
+        }
+        this.buttons[i] = gamepad.buttons[i].pressed;
+      }
+
+    } else if (Object.keys(this.buttons)) {
+      // Reset state if controls are disabled or controller is lost.
+      this.buttons = {};
+    }
+  },
+
+  emit: function (event) {
+    // Emit original event.
+    this.el.emit(event.type, event);
+
+    // Emit convenience event, identifying button index.
+    this.el.emit(
+      event.type + ':' + event.index,
+      new GamepadButtonEvent(event.type, event.index, event)
+    );
+  },
+
+  /*******************************************************************
+   * Gamepad state
+   */
+
+  /**
+   * Returns the Gamepad instance attached to the component. If connected,
+   * a proxy-controls component may provide access to Gamepad input from a
+   * remote device.
+   *
+   * @return {Gamepad}
+   */
+  getGamepad: function () {
+    var localGamepad = navigator.getGamepads
+          && navigator.getGamepads()[this.data.controller],
+        proxyControls = this.el.sceneEl.components['proxy-controls'],
+        proxyGamepad = proxyControls && proxyControls.isConnected()
+          && proxyControls.getGamepad(this.data.controller);
+    return proxyGamepad || localGamepad;
+  },
+
+  /**
+   * Returns the state of the given button.
+   * @param  {number} index The button (0-N) for which to find state.
+   * @return {GamepadButton}
+   */
+  getButton: function (index) {
+    return this.getGamepad().buttons[index];
+  },
+
+  /**
+   * Returns state of the given axis. Axes are labelled 0-N, where 0-1 will
+   * represent X/Y on the first joystick, and 2-3 X/Y on the second.
+   * @param  {number} index The axis (0-N) for which to find state.
+   * @return {number} On the interval [-1,1].
+   */
+  getAxis: function (index) {
+    return this.getGamepad().axes[index];
+  },
+
+  /**
+   * Returns the state of the given joystick (0 or 1) as a THREE.Vector2.
+   * @param  {number} id The joystick (0, 1) for which to find state.
+   * @return {THREE.Vector2}
+   */
+  getJoystick: function (index) {
+    var gamepad = this.getGamepad();
+    switch (index) {
+      case 0: return new THREE.Vector2(gamepad.axes[0], gamepad.axes[1]);
+      case 1: return new THREE.Vector2(gamepad.axes[2], gamepad.axes[3]);
+      default: throw new Error('Unexpected joystick index "%d".', index);
+    }
+  },
+
+  /**
+   * Returns the state of the dpad as a THREE.Vector2.
+   * @return {THREE.Vector2}
+   */
+  getDpad: function () {
+    var gamepad = this.getGamepad();
+    if (!gamepad.buttons[GamepadButton.DPAD_RIGHT]) {
+      return new THREE.Vector2();
+    }
+    return new THREE.Vector2(
+      (gamepad.buttons[GamepadButton.DPAD_RIGHT].pressed ? 1 : 0)
+      + (gamepad.buttons[GamepadButton.DPAD_LEFT].pressed ? -1 : 0),
+      (gamepad.buttons[GamepadButton.DPAD_UP].pressed ? -1 : 0)
+      + (gamepad.buttons[GamepadButton.DPAD_DOWN].pressed ? 1 : 0)
+    );
+  },
+
+  /**
+   * Returns true if the gamepad is currently connected to the system.
+   * @return {boolean}
+   */
+  isConnected: function () {
+    var gamepad = this.getGamepad();
+    return !!(gamepad && gamepad.connected);
+  },
+
+  /**
+   * Returns a string containing some information about the controller. Result
+   * may vary across browsers, for a given controller.
+   * @return {string}
+   */
+  getID: function () {
+    return this.getGamepad().id;
+  }
+};
+
+},{"../../lib/GamepadButton":6,"../../lib/GamepadButtonEvent":7}],14:[function(require,module,exports){
+var TICK_DEBOUNCE = 4; // ms
+
+module.exports = {
+
+  /*******************************************************************
+   * Schema
+   */
+
+  schema: {
+    enabled: { default: true }
+  },
+
+  /*******************************************************************
+   * Lifecycle
+   */
+
+  init: function () {
+    this.tPrev = 0;
+    this.dolly = new THREE.Object3D();
+    this.euler = new THREE.Euler();
+    this.controls = new THREE.VRControls(this.dolly);
+    this.zeroQuaternion = new THREE.Quaternion();
+  },
+
+  /*******************************************************************
+   * Tick
+   */
+
+  tick: function (t) {
+    t = t || Date.now();
+    if (t - this.tPrev > TICK_DEBOUNCE) {
+      this.controls.update();
+      this.tPrev = t;
+    }
+  },
+
+  /*******************************************************************
+   * Universal interface
+   */
+
+  isRotationActive: function () {
+    return this.data.enabled && !this.dolly.quaternion.equals(this.zeroQuaternion);
+  },
+
+  getRotation: (function () {
+    var hmdEuler = new THREE.Euler();
+    hmdEuler.order = 'YXZ';
+    return function () {
+      this.tick();
+      var hmdQuaternion = this.calculateHMDQuaternion();
+      hmdEuler.setFromQuaternion(hmdQuaternion);
+      return new THREE.Vector3(
+        THREE.Math.radToDeg(hmdEuler.x),
+        THREE.Math.radToDeg(hmdEuler.y),
+        THREE.Math.radToDeg(hmdEuler.z)
+      );
+    };
+  }()),
+
+  /*******************************************************************
+   * Orientation
+   */
+
+  calculateHMDQuaternion: (function () {
+    var hmdQuaternion = new THREE.Quaternion();
+    return function () {
+      var dolly = this.dolly;
+      if (!this.zeroed && !dolly.quaternion.equals(this.zeroQuaternion)) {
+        this.zeroOrientation();
+        this.zeroed = true;
+      }
+      hmdQuaternion.copy(this.zeroQuaternion).multiply(dolly.quaternion);
+      return hmdQuaternion;
+    };
+  }()),
+
+  zeroOrientation: function () {
+    var euler = new THREE.Euler();
+    euler.setFromQuaternion(this.dolly.quaternion.clone().inverse());
+    // Cancel out roll and pitch. We want to only reset yaw
+    euler.z = 0;
+    euler.x = 0;
+    this.zeroQuaternion.setFromEuler(euler);
+  }
+};
+
+},{}],15:[function(require,module,exports){
+var math = require('../math');
+
+module.exports = {
+  'checkpoint-controls': require('./checkpoint-controls'),
+  'gamepad-controls':    require('./gamepad-controls'),
+  'hmd-controls':        require('./hmd-controls'),
+  'keyboard-controls':   require('./keyboard-controls'),
+  'mouse-controls':      require('./mouse-controls'),
+  'touch-controls':      require('./touch-controls'),
+  'universal-controls':  require('./universal-controls'),
+
+  registerAll: function (AFRAME) {
+    if (this._registered) return;
+
+    AFRAME = AFRAME || window.AFRAME;
+    AFRAME = AFRAME.aframeCore || AFRAME;
+
+    math.registerAll();
+    if (!AFRAME.components['checkpoint-controls'])  AFRAME.registerComponent('checkpoint-controls', this['checkpoint-controls']);
+    if (!AFRAME.components['gamepad-controls'])     AFRAME.registerComponent('gamepad-controls',    this['gamepad-controls']);
+    if (!AFRAME.components['hmd-controls'])         AFRAME.registerComponent('hmd-controls',        this['hmd-controls']);
+    if (!AFRAME.components['keyboard-controls'])    AFRAME.registerComponent('keyboard-controls',   this['keyboard-controls']);
+    if (!AFRAME.components['mouse-controls'])       AFRAME.registerComponent('mouse-controls',      this['mouse-controls']);
+    if (!AFRAME.components['touch-controls'])       AFRAME.registerComponent('touch-controls',      this['touch-controls']);
+    if (!AFRAME.components['universal-controls'])   AFRAME.registerComponent('universal-controls',  this['universal-controls']);
+
+    this._registered = true;
+  }
+};
+
+},{"../math":24,"./checkpoint-controls":12,"./gamepad-controls":13,"./hmd-controls":14,"./keyboard-controls":16,"./mouse-controls":17,"./touch-controls":18,"./universal-controls":19}],16:[function(require,module,exports){
+require('../../lib/keyboard.polyfill');
+
+var MAX_DELTA = 0.2,
+    PROXY_FLAG = '__keyboard-controls-proxy';
+
+var KeyboardEvent = window.KeyboardEvent;
+
+/**
+ * Keyboard Controls component.
+ *
+ * Stripped-down version of: https://github.com/donmccurdy/aframe-keyboard-controls
+ *
+ * Bind keyboard events to components, or control your entities with the WASD keys.
+ *
+ * Why use KeyboardEvent.code? "This is set to a string representing the key that was pressed to
+ * generate the KeyboardEvent, without taking the current keyboard layout (e.g., QWERTY vs.
+ * Dvorak), locale (e.g., English vs. French), or any modifier keys into account. This is useful
+ * when you care about which physical key was pressed, rather thanwhich character it corresponds
+ * to. For example, if you’re a writing a game, you might want a certain set of keys to move the
+ * player in different directions, and that mapping should ideally be independent of keyboard
+ * layout. See: https://developers.google.com/web/updates/2016/04/keyboardevent-keys-codes
+ *
+ * @namespace wasd-controls
+ * keys the entity moves and if you release it will stop. Easing simulates friction.
+ * to the entity when pressing the keys.
+ * @param {bool} [enabled=true] - To completely enable or disable the controls
+ */
+module.exports = {
+  schema: {
+    enabled:           { default: true },
+    debug:             { default: false }
+  },
+
+  init: function () {
+    this.dVelocity = new THREE.Vector3();
+    this.localKeys = {};
+    this.listeners = {
+      keydown: this.onKeyDown.bind(this),
+      keyup: this.onKeyUp.bind(this),
+      blur: this.onBlur.bind(this)
+    };
+    this.attachEventListeners();
+  },
+
+  /*******************************************************************
+  * Movement
+  */
+
+  isVelocityActive: function () {
+    return this.data.enabled && !!Object.keys(this.getKeys()).length;
+  },
+
+  getVelocityDelta: function () {
+    var data = this.data,
+        keys = this.getKeys();
+
+    this.dVelocity.set(0, 0, 0);
+    if (data.enabled) {
+      if (keys.KeyW || keys.ArrowUp)    { this.dVelocity.z -= 1; }
+      if (keys.KeyA || keys.ArrowLeft)  { this.dVelocity.x -= 1; }
+      if (keys.KeyS || keys.ArrowDown)  { this.dVelocity.z += 1; }
+      if (keys.KeyD || keys.ArrowRight) { this.dVelocity.x += 1; }
+    }
+
+    return this.dVelocity.clone();
+  },
+
+  /*******************************************************************
+  * Events
+  */
+
+  play: function () {
+    this.attachEventListeners();
+  },
+
+  pause: function () {
+    this.removeEventListeners();
+  },
+
+  remove: function () {
+    this.pause();
+  },
+
+  attachEventListeners: function () {
+    window.addEventListener('keydown', this.listeners.keydown, false);
+    window.addEventListener('keyup', this.listeners.keyup, false);
+    window.addEventListener('blur', this.listeners.blur, false);
+  },
+
+  removeEventListeners: function () {
+    window.removeEventListener('keydown', this.listeners.keydown);
+    window.removeEventListener('keyup', this.listeners.keyup);
+    window.removeEventListener('blur', this.listeners.blur);
+  },
+
+  onKeyDown: function (event) {
+    this.localKeys[event.code] = true;
+    this.emit(event);
+  },
+
+  onKeyUp: function (event) {
+    delete this.localKeys[event.code];
+    this.emit(event);
+  },
+
+  onBlur: function () {
+    for (var code in this.localKeys) {
+      if (this.localKeys.hasOwnProperty(code)) {
+        delete this.localKeys[code];
+      }
+    }
+  },
+
+  emit: function (event) {
+    // TODO - keydown only initially?
+    // TODO - where the f is the spacebar
+
+    // Emit original event.
+    if (PROXY_FLAG in event) {
+      // TODO - Method never triggered.
+      this.el.emit(event.type, event);
+    }
+
+    // Emit convenience event, identifying key.
+    this.el.emit(event.type + ':' + event.code, new KeyboardEvent(event.type, event));
+    if (this.data.debug) console.log(event.type + ':' + event.code);
+  },
+
+  /*******************************************************************
+  * Accessors
+  */
+
+  isPressed: function (code) {
+    return code in this.getKeys();
+  },
+
+  getKeys: function () {
+    if (this.isProxied()) {
+      return this.el.sceneEl.components['proxy-controls'].getKeyboard();
+    }
+    return this.localKeys;
+  },
+
+  isProxied: function () {
+    var proxyControls = this.el.sceneEl.components['proxy-controls'];
+    return proxyControls && proxyControls.isConnected();
+  }
+
+};
+
+},{"../../lib/keyboard.polyfill":10}],17:[function(require,module,exports){
+/**
+ * Mouse + Pointerlock controls.
+ *
+ * Based on: https://github.com/aframevr/aframe/pull/1056
+ */
+module.exports = {
+  schema: {
+    enabled: { default: true },
+    pointerlockEnabled: { default: true },
+    sensitivity: { default: 1 / 25 }
+  },
+
+  init: function () {
+    this.mouseDown = false;
+    this.pointerLocked = false;
+    this.lookVector = new THREE.Vector2();
+    this.bindMethods();
+  },
+
+  play: function () {
+    this.addEventListeners();
+  },
+
+  pause: function () {
+    this.removeEventListeners();
+    this.lookVector.set(0, 0);
+  },
+
+  remove: function () {
+    this.pause();
+  },
+
+  bindMethods: function () {
+    this.onMouseDown = this.onMouseDown.bind(this);
+    this.onMouseMove = this.onMouseMove.bind(this);
+    this.onMouseUp = this.onMouseUp.bind(this);
+    this.onMouseUp = this.onMouseUp.bind(this);
+    this.onPointerLockChange = this.onPointerLockChange.bind(this);
+    this.onPointerLockChange = this.onPointerLockChange.bind(this);
+    this.onPointerLockChange = this.onPointerLockChange.bind(this);
+  },
+
+  addEventListeners: function () {
+    var sceneEl = this.el.sceneEl;
+    var canvasEl = sceneEl.canvas;
+    var data = this.data;
+
+    if (!canvasEl) {
+      sceneEl.addEventListener('render-target-loaded', this.addEventListeners.bind(this));
+      return;
+    }
+
+    canvasEl.addEventListener('mousedown', this.onMouseDown, false);
+    canvasEl.addEventListener('mousemove', this.onMouseMove, false);
+    canvasEl.addEventListener('mouseup', this.onMouseUp, false);
+    canvasEl.addEventListener('mouseout', this.onMouseUp, false);
+
+    if (data.pointerlockEnabled) {
+      document.addEventListener('pointerlockchange', this.onPointerLockChange, false);
+      document.addEventListener('mozpointerlockchange', this.onPointerLockChange, false);
+      document.addEventListener('pointerlockerror', this.onPointerLockError, false);
+    }
+  },
+
+  removeEventListeners: function () {
+    var canvasEl = this.el.sceneEl && this.el.sceneEl.canvas;
+    if (canvasEl) {
+      canvasEl.removeEventListener('mousedown', this.onMouseDown, false);
+      canvasEl.removeEventListener('mousemove', this.onMouseMove, false);
+      canvasEl.removeEventListener('mouseup', this.onMouseUp, false);
+      canvasEl.removeEventListener('mouseout', this.onMouseUp, false);
+    }
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange, false);
+    document.removeEventListener('mozpointerlockchange', this.onPointerLockChange, false);
+    document.removeEventListener('pointerlockerror', this.onPointerLockError, false);
+  },
+
+  isRotationActive: function () {
+    return this.data.enabled && (this.mouseDown || this.pointerLocked);
+  },
+
+  /**
+   * Returns the sum of all mouse movement since last call.
+   */
+  getRotationDelta: function () {
+    var dRotation = this.lookVector.clone().multiplyScalar(this.data.sensitivity);
+    this.lookVector.set(0, 0);
+    return dRotation;
+  },
+
+  onMouseMove: function (event) {
+    var previousMouseEvent = this.previousMouseEvent;
+
+    if (!this.data.enabled || !(this.mouseDown || this.pointerLocked)) {
+      return;
+    }
+
+    var movementX = event.movementX || event.mozMovementX || 0;
+    var movementY = event.movementY || event.mozMovementY || 0;
+
+    if (!this.pointerLocked) {
+      movementX = event.screenX - previousMouseEvent.screenX;
+      movementY = event.screenY - previousMouseEvent.screenY;
+    }
+
+    this.lookVector.x += movementX;
+    this.lookVector.y += movementY;
+
+    this.previousMouseEvent = event;
+  },
+
+  onMouseDown: function (event) {
+    var canvasEl = this.el.sceneEl.canvas;
+
+    this.mouseDown = true;
+    this.previousMouseEvent = event;
+
+    if (this.data.pointerlockEnabled && !this.pointerLocked) {
+      if (canvasEl.requestPointerLock) {
+        canvasEl.requestPointerLock();
+      } else if (canvasEl.mozRequestPointerLock) {
+        canvasEl.mozRequestPointerLock();
+      }
+    }
+  },
+
+  onMouseUp: function () {
+    this.mouseDown = false;
+  },
+
+  onPointerLockChange: function () {
+    this.pointerLocked = !!(document.pointerLockElement || document.mozPointerLockElement);
+  },
+
+  onPointerLockError: function () {
+    this.pointerLocked = false;
+  }
+};
+
+},{}],18:[function(require,module,exports){
+module.exports = {
+  schema: {
+    enabled: { default: true }
+  },
+
+  init: function () {
+    this.dVelocity = new THREE.Vector3();
+    this.bindMethods();
+  },
+
+  play: function () {
+    this.addEventListeners();
+  },
+
+  pause: function () {
+    this.removeEventListeners();
+    this.dVelocity.set(0, 0, 0);
+  },
+
+  remove: function () {
+    this.pause();
+  },
+
+  addEventListeners: function () {
+    var sceneEl = this.el.sceneEl;
+    var canvasEl = sceneEl.canvas;
+
+    if (!canvasEl) {
+      sceneEl.addEventListener('render-target-loaded', this.addEventListeners.bind(this));
+      return;
+    }
+
+    canvasEl.addEventListener('touchstart', this.onTouchStart);
+    canvasEl.addEventListener('touchend', this.onTouchEnd);
+  },
+
+  removeEventListeners: function () {
+    var canvasEl = this.el.sceneEl && this.el.sceneEl.canvas;
+    if (!canvasEl) { return; }
+
+    canvasEl.removeEventListener('touchstart', this.onTouchStart);
+    canvasEl.removeEventListener('touchend', this.onTouchEnd);
+  },
+
+  isVelocityActive: function () {
+    return this.data.enabled && this.isMoving;
+  },
+
+  getVelocityDelta: function () {
+    this.dVelocity.z = this.isMoving ? -1 : 0;
+    return this.dVelocity.clone();
+  },
+
+  bindMethods: function () {
+    this.onTouchStart = this.onTouchStart.bind(this);
+    this.onTouchEnd = this.onTouchEnd.bind(this);
+  },
+
+  onTouchStart: function (e) {
+    this.isMoving = true;
+    e.preventDefault();
+  },
+
+  onTouchEnd: function (e) {
+    this.isMoving = false;
+    e.preventDefault();
+  }
+};
+
+},{}],19:[function(require,module,exports){
+/**
+ * Universal Controls
+ *
+ * @author Don McCurdy <dm@donmccurdy.com>
+ */
+
+var COMPONENT_SUFFIX = '-controls',
+    MAX_DELTA = 0.2, // ms
+    PI_2 = Math.PI / 2;
+
+module.exports = {
+
+  /*******************************************************************
+   * Schema
+   */
+
+  dependencies: ['velocity', 'rotation'],
+
+  schema: {
+    enabled:              { default: true },
+    movementEnabled:      { default: true },
+    movementControls:     { default: ['gamepad', 'keyboard', 'touch'] },
+    rotationEnabled:      { default: true },
+    rotationControls:     { default: ['hmd', 'gamepad', 'mouse'] },
+    movementSpeed:        { default: 5 }, // m/s
+    movementEasing:       { default: 15 }, // m/s2
+    movementAcceleration: { default: 80 }, // m/s2
+    rotationSensitivity:  { default: 0.05 } // radians/frame, ish
+  },
+
+  /*******************************************************************
+   * Lifecycle
+   */
+
+  init: function () {
+    // Movement
+    this.velocity = new THREE.Vector3();
+
+    // Rotation
+    this.pitch = new THREE.Object3D();
+    this.yaw = new THREE.Object3D();
+    this.yaw.position.y = 10;
+    this.yaw.add(this.pitch);
+    this.heading = new THREE.Euler(0, 0, 0, 'YXZ');
+
+    if (this.el.sceneEl.hasLoaded) {
+      this.injectControls();
+    } else {
+      this.el.sceneEl.addEventListener('loaded', this.injectControls.bind(this));
+    }
+  },
+
+  update: function () {
+    if (this.el.sceneEl.hasLoaded) {
+      this.injectControls();
+    }
+  },
+
+  injectControls: function () {
+    var i, name,
+        data = this.data;
+
+    for (i = 0; i < data.movementControls.length; i++) {
+      name = data.movementControls[i] + COMPONENT_SUFFIX;
+      if (!this.el.components[name]) {
+        this.el.setAttribute(name, '');
+      }
+    }
+
+    for (i = 0; i < data.rotationControls.length; i++) {
+      name = data.rotationControls[i] + COMPONENT_SUFFIX;
+      if (!this.el.components[name]) {
+        this.el.setAttribute(name, '');
+      }
+    }
+  },
+
+  /*******************************************************************
+   * Tick
+   */
+
+  tick: function (t, dt) {
+    if (isNaN(dt)) { return; }
+
+    // Update rotation.
+    if (this.data.rotationEnabled) this.updateRotation(dt);
+
+    // Update velocity. If FPS is too low, reset.
+    if (this.data.movementEnabled && dt / 1000 > MAX_DELTA) {
+      this.velocity.set(0, 0, 0);
+      this.el.setAttribute('velocity', this.velocity);
+    } else {
+      this.updateVelocity(dt);
+    }
+  },
+
+  /*******************************************************************
+   * Rotation
+   */
+
+  updateRotation: function (dt) {
+    var control, dRotation,
+        data = this.data;
+
+    for (var i = 0, l = data.rotationControls.length; i < l; i++) {
+      control = this.el.components[data.rotationControls[i] + COMPONENT_SUFFIX];
+      if (control && control.isRotationActive()) {
+        if (control.getRotationDelta) {
+          dRotation = control.getRotationDelta(dt);
+          dRotation.multiplyScalar(data.rotationSensitivity);
+          this.yaw.rotation.y -= dRotation.x;
+          this.pitch.rotation.x -= dRotation.y;
+          this.pitch.rotation.x = Math.max(-PI_2, Math.min(PI_2, this.pitch.rotation.x));
+          this.el.setAttribute('rotation', {
+            x: THREE.Math.radToDeg(this.pitch.rotation.x),
+            y: THREE.Math.radToDeg(this.yaw.rotation.y),
+            z: 0
+          });
+        } else if (control.getRotation) {
+          this.el.setAttribute('rotation', control.getRotation());
+        } else {
+          throw new Error('Incompatible rotation controls: %s', data.rotationControls[i]);
+        }
+        break;
+      }
+    }
+  },
+
+  /*******************************************************************
+   * Movement
+   */
+
+  updateVelocity: function (dt) {
+    var control, velocity, dVelocity,
+        data = this.data;
+
+    if (data.movementEnabled) {
+      for (var i = 0, l = data.movementControls.length; i < l; i++) {
+        control = this.el.components[data.movementControls[i] + COMPONENT_SUFFIX];
+        if (control && control.isVelocityActive()) {
+          if (control.getVelocityDelta) {
+            dVelocity = control.getVelocityDelta(dt);
+          } else if (control.getVelocity) {
+            this.el.setAttribute('velocity', control.getVelocity());
+            return;
+          } else {
+            throw new Error('Incompatible movement controls: ', data.movementControls[i]);
+          }
+          break;
+        }
+      }
+    }
+
+    velocity = this.velocity;
+    velocity.copy(this.el.getAttribute('velocity'));
+    velocity.x -= velocity.x * data.movementEasing * dt / 1000;
+    velocity.z -= velocity.z * data.movementEasing * dt / 1000;
+
+    if (dVelocity && data.movementEnabled) {
+      // Set acceleration
+      if (dVelocity.length() > 1) {
+        dVelocity.setLength(this.data.movementAcceleration * dt / 1000);
+      } else {
+        dVelocity.multiplyScalar(this.data.movementAcceleration * dt / 1000);
+      }
+
+      // Rotate to heading
+      var rotation = this.el.getAttribute('rotation');
+      if (rotation) {
+        this.heading.set(0 /* no flying */, THREE.Math.degToRad(rotation.y), 0);
+        dVelocity.applyEuler(this.heading);
+      }
+
+      velocity.add(dVelocity);
+
+      // TODO - Several issues here:
+      // (1) Interferes w/ gravity.
+      // (2) Interferes w/ jumping.
+      // (3) Likely to interfere w/ relative position to moving platform.
+      // if (velocity.length() > data.movementSpeed) {
+      //   velocity.setLength(data.movementSpeed);
+      // }
+    }
+
+    this.el.setAttribute('velocity', velocity);
+  }
+};
+
+},{}],20:[function(require,module,exports){
+/**
+ * three-model
+ *
+ * Wraps THREE.FBXLoader, and therefore has the same feature support:
+ *
+ * Loads FBX file in *ASCII and version 7 format.
+ *
+ * Supported
+ *  - mesh
+ *  - skinning
+ *  - normal / uv
+ *
+ * Not Supported
+ *  - material
+ *  - texture
+ *  - morph
+ */
+THREE.FBXLoader = require('../../lib/FBXLoader');
+
+module.exports = {
+  schema: {src: { type: 'src' }},
+
+  init: function () {
+    this.model = null;
+  },
+
+  update: function () {
+    var loader,
+        data = this.data;
+
+    if (!data.src) {
+      console.warn('[%s] `src` property is required.', this.name);
+      return;
+    }
+
+    this.remove();
+    loader = new THREE.FBXLoader();
+    loader.load(data.src, this.load.bind(this));
+  },
+
+  load: function (model) {
+    this.model = model;
+    this.el.setObject3D('mesh', model);
+    this.el.emit('model-loaded', {format: 'fbx', model: model});
+  },
+
+  remove: function () {
+    if (this.model) this.el.removeObject3D('mesh');
+  }
+};
+
+},{"../../lib/FBXLoader":5}],21:[function(require,module,exports){
+module.exports = {
+  'fbx-model':   require('./fbx-model'),
+  'ply-model': require('./ply-model'),
+  'three-model': require('./three-model'),
+
+  registerAll: function (AFRAME) {
+    if (this._registered) return;
+
+    AFRAME = AFRAME || window.AFRAME;
+    AFRAME = AFRAME.aframeCore || AFRAME;
+    if (!AFRAME.components['fbx-model'])    AFRAME.registerComponent('fbx-model',   this['fbx-model']);
+    if (!AFRAME.components['ply-model'])    AFRAME.registerComponent('ply-model',   this['ply-model']);
+    if (!AFRAME.components['three-model'])  AFRAME.registerComponent('three-model', this['three-model']);
+
+    this._registered = true;
+  }
+};
+
+},{"./fbx-model":20,"./ply-model":22,"./three-model":23}],22:[function(require,module,exports){
+/**
+ * ply-model
+ *
+ * Wraps THREE.PLYLoader.
+ */
+THREE.PLYLoader = require('../../lib/PLYLoader');
+
+module.exports = {
+  schema: {src: { type: 'src' }},
+
+  init: function () {
+    this.model = null;
+  },
+
+  update: function () {
+    var loader,
+        data = this.data;
+
+    if (!data.src) {
+      console.warn('[%s] `src` property is required.', this.name);
+      return;
+    }
+
+    this.remove();
+    loader = new THREE.PLYLoader();
+    loader.load(data.src, this.load.bind(this));
+  },
+
+  load: function (geometry) {
+    this.model = new THREE.Mesh(geometry, new THREE.MeshPhongMaterial({
+      color: 0xFFFFFF,
+      shading: THREE.FlatShading,
+      vertexColors: THREE.VertexColors,
+      shininess: 0
+    }));
+    this.el.setObject3D('mesh', this.model);
+    this.el.emit('model-loaded', {format: 'ply', model: this.model});
+  },
+
+  remove: function () {
+    if (this.model) this.el.removeObject3D('mesh');
+  }
+};
+
+},{"../../lib/PLYLoader":8}],23:[function(require,module,exports){
+/**
+ * three-model
+ *
+ * Loader for THREE.js JSON format. Somewhat confusingly, there are two
+ * different THREE.js formats, both having the .json extension. This loader
+ * supports both, but requires you to specify the mode as "object" or "json".
+ *
+ * Typically, you will use "json" for a single mesh, and "object" for a scene
+ * or multiple meshes. Check the console for errors, if in doubt.
+ *
+ * See: https://clara.io/learn/user-guide/data_exchange/threejs_export
+ */
+module.exports = {
+  schema: {
+    src:          { type: 'src' },
+    loader:       { default: 'object', oneOf: ['object', 'json'] },
+    animation:    { default: '' }
+  },
+
+  init: function () {
+    this.model = null;
+    this.mixer = null;
+  },
+
+  update: function (previousData) {
+    var loader,
+        data = this.data;
+    if (!data.src) return;
+
+    if (!previousData) {
+      this.remove();
+      if (data.loader === 'object') {
+        loader = new THREE.ObjectLoader();
+        loader.load(data.src, this.load.bind(this));
+      } else if (data.loader === 'json') {
+        loader = new THREE.JSONLoader();
+        loader.load(data.src, function (geometry, materials) {
+          this.load(new THREE.Mesh(geometry, new THREE.MeshFaceMaterial(materials)));
+        }.bind(this));
+      } else {
+        throw new Error('[three-model] Invalid mode "%s".', data.mode);
+      }
+    } else if (data.animation !== previousData.animation) {
+      if (this.model.activeAction) {
+        this.model.activeAction.stop();
+        this.playAnimation();
+      }
+    }
+  },
+
+  load: function (model) {
+    this.model = model;
+    this.mixer = new THREE.AnimationMixer(this.model);
+    this.el.setObject3D('mesh', model);
+    this.el.emit('model-loaded', {format: 'three', model: model});
+
+    if (this.data.animation) this.playAnimation();
+  },
+
+  playAnimation: function () {
+    var data = this.data,
+        animations = this.model.animations || this.model.geometry.animations,
+        clip = THREE.AnimationClip.findByName(animations, data.animation);
+    this.model.activeAction = this.mixer.clipAction(clip, this.model).play();
+  },
+
+  remove: function () {
+    if (this.mixer) this.mixer.stopAllAction();
+    if (this.model) this.el.removeObject3D('mesh');
+  },
+
+  tick: function (t, dt) {
+    if (this.mixer && !isNaN(dt)) {
+      this.mixer.update(dt / 1000);
+    }
+  }
+};
+
+},{}],24:[function(require,module,exports){
+module.exports = {
+  'velocity':   require('./velocity'),
+  'quaternion': require('./quaternion'),
+
+  registerAll: function (AFRAME) {
+    if (this._registered) return;
+
+    AFRAME = AFRAME || window.AFRAME;
+    AFRAME = AFRAME.aframeCore || AFRAME;
+    if (!AFRAME.components['velocity'])    AFRAME.registerComponent('velocity',   this.velocity);
+    if (!AFRAME.components['quaternion'])  AFRAME.registerComponent('quaternion', this.quaternion);
+
+    this._registered = true;
+  }
+};
+
+},{"./quaternion":25,"./velocity":26}],25:[function(require,module,exports){
+/**
+ * Quaternion.
+ *
+ * Represents orientation of object in three dimensions. Similar to `rotation`
+ * component, but avoids problems of gimbal lock.
+ *
+ * See: https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
+ */
+module.exports = {
+  schema: {type: 'vec4'},
+  update: function () {
+    var data = this.data;
+    this.el.object3D.quaternion.set(data.x, data.y, data.z, data.w);
+  }
+};
+
+},{}],26:[function(require,module,exports){
+/**
+ * Velocity, in m/s.
+ */
+module.exports = {
+  schema: {type: 'vec3'},
+
+  init: function () {
+    this.system = this.el.sceneEl.systems.physics;
+
+    if (this.system) {
+      this.system.addBehavior(this, this.system.Phase.RENDER);
+    }
+  },
+
+  remove: function () {
+    if (this.system) {
+      this.system.removeBehavior(this, this.system.Phase.RENDER);
+    }
+  },
+
+  tick: function (t, dt) {
+    if (isNaN(dt)) return;
+    if (this.system) return;
+    this.step(t, dt);
+  },
+
+  step: function (t, dt) {
+    if (isNaN(dt)) return;
+
+    var physics = this.el.sceneEl.systems.physics || {maxInterval: 1 / 60},
+
+        // TODO - There's definitely a bug with getComputedAttribute and el.data.
+        velocity = this.el.getAttribute('velocity') || {x: 0, y: 0, z: 0},
+        position = this.el.getAttribute('position') || {x: 0, y: 0, z: 0};
+
+    dt = Math.min(dt, physics.maxInterval * 1000);
+
+    this.el.setAttribute('position', {
+      x: position.x + velocity.x * dt / 1000,
+      y: position.y + velocity.y * dt / 1000,
+      z: position.z + velocity.z * dt / 1000
+    });
+  }
+};
+
+},{}],27:[function(require,module,exports){
+module.exports = {
+  schema: {
+    defaultRotation: {type: 'vec3'},
+    enableDefaultRotation: {default: false}
+  },
+
+  init: function () {
+    this.active = false;
+    this.targetEl = null;
+    this.fire = this.fire.bind(this);
+  },
+
+  play: function () { this.el.addEventListener('click', this.fire); },
+  pause: function () { this.el.addEventListener('click', this.fire); },
+  remove: function () { this.pause(); },
+
+  fire: function () {
+    var targetEl = this.el.sceneEl.querySelector('[checkpoint-controls]');
+    if (!targetEl) {
+      throw new Error('No `checkpoint-controls` component found.');
+    }
+    targetEl.components['checkpoint-controls'].setCheckpoint(this.el);
+  }
+};
+
+},{}],28:[function(require,module,exports){
+var math = require('../math'),
+    physics = require('../physics');
+
+module.exports = {
+  'checkpoint':      require('./checkpoint'),
+  'jump-ability':      require('./jump-ability'),
+  'toggle-velocity':   require('./toggle-velocity'),
+
+  registerAll: function (AFRAME) {
+    if (this._registered) return;
+
+    AFRAME = AFRAME || window.AFRAME;
+    AFRAME = AFRAME.aframeCore || AFRAME;
+
+    math.registerAll();
+    physics.registerAll();
+    if (!AFRAME.components['checkpoint'])       AFRAME.registerComponent('checkpoint',        this['checkpoint']);
+    if (!AFRAME.components['jump-ability'])     AFRAME.registerComponent('jump-ability',      this['jump-ability']);
+    if (!AFRAME.components['toggle-velocity'])  AFRAME.registerComponent('toggle-velocity',   this['toggle-velocity']);
+
+    this._registered = true;
+  }
+};
+
+},{"../math":24,"../physics":34,"./checkpoint":27,"./jump-ability":29,"./toggle-velocity":30}],29:[function(require,module,exports){
+var ACCEL_G = -9.8, // m/s^2
+    EASING = -15; // m/s^2
+
+/**
+ * Jump ability.
+ */
+module.exports = {
+  dependencies: ['velocity'],
+
+  /* Schema
+  ——————————————————————————————————————————————*/
+
+  schema: {
+    on: { default: 'keydown:Space gamepadbuttondown:0' },
+    playerHeight: { default: 1.764 },
+    enableDoubleJump: { default: false },
+    distance: { default: 5 },
+    soundJump: { default: '' },
+    soundLand: { default: '' },
+    debug: { default: false }
+  },
+
+  init: function () {
+    this.isOnObject = true;
+    this.velocity = 0;
+    this.numJumps = 0;
+
+    var beginJump = this.beginJump.bind(this),
+        events = this.data.on.split(' ');
+    this.bindings = {};
+    for (var i = 0; i <  events.length; i++) {
+      this.bindings[events[i]] = beginJump;
+      this.el.addEventListener(events[i], beginJump);
+    }
+  },
+
+  remove: function () {
+    for (var event in this.bindings) {
+      if (this.bindings.hasOwnProperty(event)) {
+        this.el.removeEventListener(event, this.bindings[event]);
+        delete this.bindings[event];
+      }
+    }
+  },
+
+  beginJump: function () {
+    if (this.isOnObject || this.data.enableDoubleJump && this.numJumps === 1) {
+      var data = this.data,
+          initialVelocity = Math.sqrt(-2 * data.distance * (ACCEL_G + EASING)),
+          v = this.el.getAttribute('velocity');
+      this.el.setAttribute('velocity', {x: v.x, y: initialVelocity, z: v.z});
+      this.numJumps++;
+    }
+  }
+};
+
+},{}],30:[function(require,module,exports){
+/**
+ * Toggle velocity.
+ *
+ * Moves an object back and forth along an axis, within a min/max extent.
+ */
+module.exports = {
+  dependencies: ['velocity'],
+  schema: {
+    axis: { default: 'x', oneOf: ['x', 'y', 'z'] },
+    min: { default: 0 },
+    max: { default: 0 },
+    speed: { default: 1 }
+  },
+  init: function () {
+    var velocity = {x: 0, y: 0, z: 0};
+    velocity[this.data.axis] = this.data.speed;
+    this.el.setAttribute('velocity', velocity);
+
+    if (this.el.sceneEl.addBehavior) this.el.sceneEl.addBehavior(this);
+  },
+  remove: function () {},
+  update: function () { this.tick(); },
+  tick: function () {
+    var data = this.data,
+        velocity = this.el.getAttribute('velocity'),
+        position = this.el.getAttribute('position');
+    if (velocity[data.axis] > 0 && position[data.axis] > data.max) {
+      velocity[data.axis] = -data.speed;
+      this.el.setAttribute('velocity', velocity);
+    } else if (velocity[data.axis] < 0 && position[data.axis] < data.min) {
+      velocity[data.axis] = data.speed;
+      this.el.setAttribute('velocity', velocity);
+    }
+  },
+};
+
+},{}],31:[function(require,module,exports){
+var CANNON = require('cannon'),
+    mesh2shape = require('../../lib/CANNON-mesh2shape');
+
+require('../../lib/CANNON-shape2mesh');
+
+module.exports = {
+  dependencies: ['position'],
+
+  init: function () {
+    this.initBody();
+  },
+
+  initBody: function () {
+    this.system = this.el.sceneEl.systems.physics;
+
+    var shape, options;
+
+    if (this.data.shape !== 'auto') {
+      options = {
+        type: mesh2shape.Type[this.data.shape.toUpperCase()]
+      };
+    }
+
+    // TODO - This is pretty obtuse. There really ought to be a clean way to
+    // delay component initialization until the scene and all of its components
+    // have been taken care of.
+    shape = mesh2shape(this.el.object3D, options);
+    if (shape && this.el.sceneEl.hasLoaded) {
+      this.initBody_(shape);
+    } else if (shape && !this.el.sceneEl.hasLoaded) {
+      this.el.sceneEl.addEventListener('loaded', this.initBody_.bind(this, shape));
+    } else if (!this.el.sceneEl.hasLoaded) {
+      this.el.sceneEl.addEventListener('loaded', function () {
+        shape = mesh2shape(this.el.object3D, options);
+        if (shape) {
+          this.initBody_(shape);
+        } else {
+          this.el.addEventListener('model-loaded', function (e) {
+            this.initBody_(mesh2shape(e.detail.model, options));
+          }.bind(this));
+        }
+      }.bind(this));
+    } else {
+      this.el.addEventListener('model-loaded', function (e) {
+        this.initBody_(mesh2shape(e.detail.model, options));
+      }.bind(this));
+    }
+  },
+
+  initBody_: function (shape) {
+    var el = this.el,
+        data = this.data,
+        pos = el.getAttribute('position');
+
+    if (!pos) {
+      pos = {x: 0, y: 0, z: 0};
+      el.setAttribute('position', pos);
+    }
+
+    // Apply scaling
+    if (this.el.hasAttribute('scale')) {
+      if (shape.setScale) {
+        shape.setScale(this.el.getAttribute('scale'));
+      } else {
+        console.warn('Physics body scaling could not be applied.');
+      }
+    }
+
+    this.body = new CANNON.Body({
+      mass: data.mass || 0,
+      material: this.system.material,
+      position: new CANNON.Vec3(pos.x, pos.y, pos.z),
+      linearDamping: data.linearDamping,
+      angularDamping: data.angularDamping
+    });
+    this.body.addShape(shape, shape.offset, shape.orientation);
+
+    // Apply rotation
+    var rot = el.getAttribute('rotation') || {x: 0, y: 0, z: 0};
+    this.body.quaternion.setFromEuler(
+      THREE.Math.degToRad(rot.x),
+      THREE.Math.degToRad(rot.y),
+      THREE.Math.degToRad(rot.z),
+      'XYZ'
+    ).normalize();
+
+    // Show wireframe
+    if (this.system.debug) {
+      this.createWireframe(this.body, shape);
+    }
+
+    this.el.body = this.body;
+    this.body.el = this.el;
+    this.loaded = true;
+    this.play();
+
+    this.el.emit('body-loaded', {body: this.el.body});
+  },
+
+  play: function () {
+    if (!this.loaded) return;
+
+    this.system.addBehavior(this, this.system.Phase.SIMULATE);
+    this.system.addBody(this.body);
+    if (this.wireframe) this.el.sceneEl.object3D.add(this.wireframe);
+
+    this.syncToPhysics();
+  },
+
+  pause: function () {
+    if (!this.loaded) return;
+
+    this.system.removeBehavior(this, this.system.Phase.SIMULATE);
+    this.system.removeBody(this.body);
+    if (this.wireframe) this.el.sceneEl.object3D.remove(this.wireframe);
+  },
+
+  remove: function () {
+    this.pause();
+    delete this.body.el;
+    delete this.body;
+    delete this.el.body;
+    delete this.wireframe;
+  },
+
+  createWireframe: function (body, shape) {
+    var offset = shape.offset,
+        orientation = shape.orientation,
+        mesh = CANNON.shape2mesh(body).children[0];
+    this.wireframe = new THREE.EdgesHelper(mesh, 0xff0000);
+
+    if (offset) {
+      this.wireframe.offset = offset.clone();
+    }
+
+    if (orientation) {
+      orientation.inverse(orientation);
+      this.wireframe.orientation = new THREE.Quaternion(
+        orientation.x,
+        orientation.y,
+        orientation.z,
+        orientation.w
+      );
+    }
+
+    this.syncWireframe();
+  },
+
+  syncWireframe: function () {
+    var offset,
+        wireframe = this.wireframe;
+
+    if (!this.wireframe) return;
+
+    // Apply rotation. If the shape required custom orientation, also apply
+    // that on the wireframe.
+    wireframe.quaternion.copy(this.body.quaternion);
+    if (wireframe.orientation) {
+      wireframe.quaternion.multiply(wireframe.orientation);
+    }
+
+    // Apply position. If the shape required custom offset, also apply that on
+    // the wireframe.
+    wireframe.position.copy(this.body.position);
+    if (wireframe.offset) {
+      offset = wireframe.offset.clone().applyQuaternion(wireframe.quaternion);
+      wireframe.position.add(offset);
+    }
+
+    wireframe.updateMatrix();
+  },
+
+  syncToPhysics: function () {
+    var body = this.body;
+    if (!body) return;
+    if (this.el.components.velocity) body.velocity.copy(this.el.getComputedAttribute('velocity'));
+    if (this.el.components.position) body.position.copy(this.el.getComputedAttribute('position'));
+    if (this.wireframe) this.syncWireframe();
+  },
+
+  syncFromPhysics: function () {
+    if (!this.body) return;
+    this.el.setAttribute('quaternion', this.body.quaternion);
+    this.el.setAttribute('position', this.body.position);
+    if (this.wireframe) this.syncWireframe();
+  }
+};
+
+},{"../../lib/CANNON-mesh2shape":3,"../../lib/CANNON-shape2mesh":4,"cannon":11}],32:[function(require,module,exports){
+module.exports = {
+  GRAVITY: -9.8,
+  MAX_INTERVAL: 4 / 60,
+  ITERATIONS: 10,
+  CONTACT_MATERIAL: {
+    friction:     0.01,
+    restitution:  0.3,
+    contactEquationStiffness: 1e8,
+    contactEquationRelaxation: 3,
+    frictionEquationStiffness: 1e8,
+    frictionEquationRegularization: 3
+  }
+};
+
+},{}],33:[function(require,module,exports){
+var Body = require('./body');
+
+/**
+ * Dynamic body.
+ *
+ * Moves according to physics simulation, and may collide with other objects.
+ */
+module.exports = AFRAME.utils.extend({}, Body, {
+  dependencies: ['position', 'quaternion', 'velocity'],
+
+  schema: {
+    mass:           { default: 5 },
+    linearDamping:  { default: 0.01 },
+    angularDamping: { default: 0.01 },
+    shape: {default: 'auto', oneOf: ['auto', 'box', 'hull']}
+  },
+
+  step: function () {
+    this.syncFromPhysics();
+  }
+});
+
+},{"./body":31}],34:[function(require,module,exports){
+var CANNON = require('cannon'),
+    math = require('../math');
+
+module.exports = {
+  'physics':        require('./physics'),
+  'dynamic-body':   require('./dynamic-body'),
+  'kinematic-body': require('./kinematic-body'),
+  'static-body':    require('./static-body'),
+  'system': {
+    'physics': require('./system/physics')
+  },
+
+  registerAll: function (AFRAME) {
+    if (this._registered) return;
+
+    AFRAME = AFRAME || window.AFRAME;
+    AFRAME = AFRAME.aframeCore || AFRAME;
+
+    math.registerAll();
+    if (!AFRAME.systems.physics)              AFRAME.registerSystem('physics', this.system.physics);
+    if (!AFRAME.components['physics'])        AFRAME.registerComponent('physics',        this['physics']);
+    if (!AFRAME.components['dynamic-body'])   AFRAME.registerComponent('dynamic-body',   this['dynamic-body']);
+    if (!AFRAME.components['kinematic-body']) AFRAME.registerComponent('kinematic-body', this['kinematic-body']);
+    if (!AFRAME.components['static-body'])    AFRAME.registerComponent('static-body',    this['static-body']);
+
+    this._registered = true;
+  }
+};
+
+// Export CANNON.js.
+window.CANNON = window.CANNON || CANNON;
+
+},{"../math":24,"./dynamic-body":33,"./kinematic-body":35,"./physics":36,"./static-body":37,"./system/physics":38,"cannon":11}],35:[function(require,module,exports){
+/**
+ * Kinematic body.
+ *
+ * Managed dynamic body, which moves but is not affected (directly) by the
+ * physics engine. This is not a true kinematic body, in the sense that we are
+ * letting the physics engine _compute_ collisions against it and selectively
+ * applying those collisions to the object. The physics engine does not decide
+ * the position/velocity/rotation of the element.
+ *
+ * Used for the camera object, because full physics simulation would create
+ * movement that feels unnatural to the player. Bipedal movement does not
+ * translate nicely to rigid body physics.
+ *
+ * See: http://www.learn-cocos2d.com/2013/08/physics-engine-platformer-terrible-idea/
+ * And: http://oxleygamedev.blogspot.com/2011/04/player-physics-part-2.html
+ */
+var CANNON = require('cannon');
+
+var EPS = 0.000001;
+
+module.exports = {
+  dependencies: ['velocity'],
+
+  /*******************************************************************
+   * Schema
+   */
+
+  schema: {
+    mass:           { default: 5 },
+    radius:         { default: 1.3 },
+    height:         { default: 1.764 },
+    linearDamping:  { default: 0.05 },
+    enableSlopes:   { default: true }
+  },
+
+  /*******************************************************************
+   * Lifecycle
+   */
+
+  init: function () {
+    this.system = this.el.sceneEl.systems.physics;
+    this.system.addBehavior(this, this.system.Phase.SIMULATE);
+
+    var el = this.el,
+        data = this.data,
+        position = (new CANNON.Vec3()).copy(el.getAttribute('position'));
+
+    this.body = new CANNON.Body({
+      shape: new CANNON.Sphere(data.radius),
+      material: this.system.material,
+      position: position,
+      mass: data.mass,
+      linearDamping: data.linearDamping,
+      fixedRotation: true
+    });
+    this.body.position.y -= (data.height - data.radius); // TODO - Simplify.
+
+    this.body.el = this.el;
+    this.system.addBody(this.body);
+  },
+
+  remove: function () {
+    this.system.removeBody(this.body);
+    this.system.removeBehavior(this, this.system.Phase.SIMULATE);
+  },
+
+  /*******************************************************************
+   * Tick
+   */
+
+  /**
+   * Checks CANNON.World for collisions and attempts to apply them to the
+   * element automatically, in a player-friendly way.
+   *
+   * There's extra logic for horizontal surfaces here. The basic requirements:
+   * (1) Only apply gravity when not in contact with _any_ horizontal surface.
+   * (2) When moving, project the velocity against exactly one ground surface.
+   *     If in contact with two ground surfaces (e.g. ground + ramp), choose
+   *     the one that collides with current velocity, if any.
+   */
+  step: (function () {
+    var velocity = new THREE.Vector3(),
+        normalizedVelocity = new THREE.Vector3(),
+        currentSurfaceNormal = new THREE.Vector3(),
+        groundNormal = new THREE.Vector3();
+
+    return function (t, dt) {
+      if (isNaN(dt)) return;
+
+      var body = this.body,
+          data = this.data,
+          didCollide = false,
+          height, groundHeight = -Infinity,
+          groundBody;
+
+      dt = Math.min(dt, this.system.maxInterval * 1000);
+
+      groundNormal.set(0, 0, 0);
+      velocity.copy(this.el.getAttribute('velocity'));
+      body.velocity.copy(velocity);
+      body.position.copy(this.el.getAttribute('position'));
+
+      for (var i = 0, contact; (contact = this.system.world.contacts[i]); i++) {
+        // 1. Find any collisions involving this element. Get the contact
+        // normal, and make sure it's oriented _out_ of the other object.
+        if (body.id === contact.bi.id) {
+          contact.ni.negate(currentSurfaceNormal);
+        } else if (body.id === contact.bj.id) {
+          currentSurfaceNormal.copy(contact.ni);
+        } else {
+          continue;
+        }
+
+        didCollide = body.velocity.dot(currentSurfaceNormal) < -EPS;
+        if (didCollide && currentSurfaceNormal.y <= 0.5) {
+          // 2. If current trajectory attempts to move _through_ another
+          // object, project the velocity against the collision plane to
+          // prevent passing through.
+          velocity = velocity.projectOnPlane(currentSurfaceNormal);
+        } else if (currentSurfaceNormal.y > 0.5) {
+          // 3. If in contact with something roughly horizontal (+/- 45º) then
+          // consider that the current ground. Only the highest qualifying
+          // ground is retained.
+          height = body.id === contact.bi.id
+            ? Math.abs(contact.rj.y + contact.bj.position.y)
+            : Math.abs(contact.ri.y + contact.bi.position.y);
+          if (height > groundHeight) {
+            groundHeight = height;
+            groundNormal.copy(currentSurfaceNormal);
+            groundBody = body.id === contact.bi.id ? contact.bj : contact.bi;
+          }
+        }
+      }
+
+      normalizedVelocity.copy(velocity).normalize();
+      if (groundBody && normalizedVelocity.y < 0.5) {
+        if (!data.enableSlopes) {
+          groundNormal.set(0, 1, 0);
+        } else if (groundNormal.y < 1 - EPS) {
+          groundNormal = this.raycastToGround(groundBody, groundNormal);
+        }
+
+        // 4. Project trajectory onto the top-most ground object, unless
+        // trajectory is > 45º.
+        velocity = velocity.projectOnPlane(groundNormal);
+      } else {
+        // 5. If not in contact with anything horizontal, apply world gravity.
+        // TODO - Why is the 4x scalar necessary.
+        velocity.add(this.system.world.gravity.scale(dt * 4.0 / 1000));
+      }
+
+      // 6. If the ground surface has a velocity, apply it directly to current
+      // position, not velocity, to preserve relative velocity.
+      if (groundBody && groundBody.el && groundBody.el.components.velocity) {
+        var groundVelocity = groundBody.el.getAttribute('velocity');
+        body.position.copy({
+          x: body.position.x + groundVelocity.x * dt / 1000,
+          y: body.position.y + groundVelocity.y * dt / 1000,
+          z: body.position.z + groundVelocity.z * dt / 1000
+        });
+        this.el.setAttribute('position', body.position);
+      }
+
+      body.position.y -= (data.height - data.radius); // TODO - Simplify.
+      body.velocity.copy(velocity);
+      this.el.setAttribute('velocity', velocity);
+    };
+  }()),
+
+  /**
+   * When walking on complex surfaces (trimeshes, borders between two shapes),
+   * the collision normals returned for the player sphere can be very
+   * inconsistent. To address this, raycast straight down, find the collision
+   * normal, and return whichever normal is more vertical.
+   * @param  {CANNON.Body} groundBody
+   * @param  {CANNON.Vec3} groundNormal
+   * @return {CANNON.Vec3}
+   */
+  raycastToGround: function (groundBody, groundNormal) {
+    var ray,
+        hitNormal,
+        vFrom = this.body.position,
+        vTo = this.body.position.clone();
+
+    vTo.y -= this.data.height;
+    ray = new CANNON.Ray(vFrom, vTo);
+    ray._updateDirection(); // TODO - Report bug.
+    ray.intersectBody(groundBody);
+
+    if (!ray.hasHit) return groundNormal;
+
+    // Compare ABS, in case we're projecting against the inside of the face.
+    hitNormal = ray.result.hitNormalWorld;
+    return Math.abs(hitNormal.y) > Math.abs(groundNormal.y) ? hitNormal : groundNormal;
+  }
+};
+
+},{"cannon":11}],36:[function(require,module,exports){
+var CONSTANTS = require('./constants'),
+    C_GRAV = CONSTANTS.GRAVITY,
+    C_MAT = CONSTANTS.CONTACT_MATERIAL;
+
+module.exports = {
+  schema: {
+    gravity:                            { default: C_GRAV },
+    friction:                           { default: C_MAT.friction },
+    restitution:                        { default: C_MAT.restitution },
+    contactEquationStiffness:           { default: C_MAT.contactEquationStiffness },
+    contactEquationRelaxation:          { default: C_MAT.contactEquationRelaxation },
+    frictionEquationStiffness:          { default: C_MAT.frictionEquationStiffness },
+    frictionEquationRegularization:     { default: C_MAT.frictionEquationRegularization },
+
+    // Never step more than four frames at once. Effectively pauses the scene
+    // when out of focus, and prevents weird "jumps" when focus returns.
+    maxInterval:      { default: 4 / 60 },
+
+    // If true, show wireframes around physics bodies.
+    debug:        { default: false },
+  },
+
+  update: function (previousData) {
+    var data = this.data,
+        schema = this.schema;
+    for (var opt in data) {
+      if (data[opt] !== (previousData ? previousData[opt] : schema[opt].default)) {
+        this.system.setOption(opt, data[opt]);
+      }
+    }
+  }
+};
+
+},{"./constants":32}],37:[function(require,module,exports){
+var Body = require('./body');
+
+/**
+ * Static body.
+ *
+ * Solid body with a fixed position. Unaffected by gravity and collisions, but
+ * other objects may collide with it.
+ */
+module.exports = AFRAME.utils.extend({}, Body, {
+  schema: {
+    shape: {default: 'auto', oneOf: ['auto', 'box', 'hull']}
+  },
+  step: function () {
+    this.syncToPhysics();
+  }
+});
+
+},{"./body":31}],38:[function(require,module,exports){
+var CANNON = require('cannon'),
+    CONSTANTS = require('../constants'),
+    C_MAT = CONSTANTS.CONTACT_MATERIAL;
+
+/**
+ * Physics system.
+ */
+module.exports = {
+  /**
+   * Update phases, used to separate physics simulation from updates to A-Frame scene.
+   * @enum {string}
+   */
+  Phase: {
+    SIMULATE: 'sim',
+    RENDER:   'render'
+  },
+
+  /**
+   * Initializes the physics system.
+   */
+  init: function () {
+    // Never step more than four frames at once. Effectively pauses the scene
+    // when out of focus, and prevents weird "jumps" when focus returns.
+    this.maxInterval = CONSTANTS.MAX_INTERVAL;
+
+    // If true, show wireframes around physics bodies.
+    this.debug = false;
+
+    this.children = {};
+    this.children[this.Phase.SIMULATE] = [];
+    this.children[this.Phase.RENDER] = [];
+
+    this.listeners = {};
+
+    this.world = new CANNON.World();
+    this.world.quatNormalizeSkip = 0;
+    this.world.quatNormalizeFast = false;
+    // this.world.solver.setSpookParams(300,10);
+    this.world.solver.iterations = CONSTANTS.ITERATIONS;
+    this.world.gravity.set(0, CONSTANTS.GRAVITY, 0);
+    this.world.broadphase = new CANNON.NaiveBroadphase();
+
+    this.material = new CANNON.Material({name: 'defaultMaterial'});
+    this.contactMaterial = new CANNON.ContactMaterial(this.material, this.material, {
+        friction: C_MAT.friction,
+        restitution: C_MAT.restitution,
+        contactEquationStiffness: C_MAT.contactEquationStiffness,
+        contactEquationRelaxation: C_MAT.contactEquationRelaxation,
+        frictionEquationStiffness: C_MAT.frictionEquationStiffness,
+        frictionEquationRegularization: C_MAT.frictionEquationRegularization
+    });
+    this.world.addContactMaterial(this.contactMaterial);
+  },
+
+  /**
+   * Updates the physics world on each tick of the A-Frame scene. It would be
+   * entirely possible to separate the two – updating physics more or less
+   * frequently than the scene – if greater precision or performance were
+   * necessary.
+   * @param  {number} t
+   * @param  {number} dt
+   */
+  tick: function (t, dt) {
+    if (isNaN(dt)) return;
+
+    this.world.step(Math.min(dt / 1000, this.maxInterval));
+
+    var i;
+    for (i = 0; i < this.children[this.Phase.SIMULATE].length; i++) {
+      this.children[this.Phase.SIMULATE][i].step(t, dt);
+    }
+
+    for (i = 0; i < this.children[this.Phase.RENDER].length; i++) {
+      this.children[this.Phase.RENDER][i].step(t, dt);
+    }
+  },
+
+  /**
+   * Adds a body to the scene, and binds collision events to the element.
+   * @param {CANNON.Body} body
+   */
+  addBody: function (body) {
+    this.listeners[body.id] = function (e) { body.el.emit('collide', e); };
+    body.addEventListener('collide', this.listeners[body.id]);
+    this.world.addBody(body);
+  },
+
+  /**
+   * Removes a body, and its listeners, from the scene.
+   * @param {CANNON.Body} body
+   */
+  removeBody: function (body) {
+    body.removeEventListener('collide', this.listeners[body.id]);
+    delete this.listeners[body.id];
+    this.world.removeBody(body);
+  },
+
+  /**
+   * Adds a component instance to the system, to be invoked on each tick during
+   * the given phase.
+   * @param {Component} component
+   * @param {string} phase
+   */
+  addBehavior: function (component, phase) {
+    this.children[phase].push(component);
+  },
+
+  /**
+   * Removes a component instance from the system.
+   * @param {Component} component
+   * @param {string} phase
+   */
+  removeBehavior: function (component, phase) {
+    this.children[phase].splice(this.children[phase].indexOf(component), 1);
+  },
+
+  /**
+   * Sets an option on the physics system, affecting future simulation steps.
+   * @param {string} opt
+   * @param {mixed} value
+   */
+  setOption: function (opt, value) {
+    switch (opt) {
+      case 'maxInterval': return this.setMaxInterval(value);
+      case 'gravity':     return this.setGravity(value);
+      case 'debug':       return this.setDebug(value);
+      case 'friction':
+      case 'restitution':
+      case 'contactEquationStiffness':
+      case 'contactEquationRelaxation':
+      case 'frictionEquationStiffness':
+      case 'frictionEquationRegularization':
+        return this.setContactMaterialProperty(opt, value);
+      default:
+        console.error('Option "%s" not recognized.', opt);
+    }
+  },
+
+  setMaxInterval: function (maxInterval) {
+    this.maxInterval = maxInterval;
+  },
+
+  setGravity: function (gravity) {
+    this.world.gravity.y = gravity;
+  },
+
+  setDebug: function (debug) {
+    this.debug = debug;
+    console.warn('[physics] Option "debug" cannot be dynamically updated yet');
+  },
+
+  setContactMaterialProperty: function (prop, value) {
+    this.contactMaterial[prop] = value;
+  }
+};
+
+},{"../constants":32,"cannon":11}],39:[function(require,module,exports){
+/**
+ * Flat grid.
+ *
+ * Defaults to 75x75.
+ */
+module.exports = {
+  defaultAttributes: {
+    geometry: {
+      primitive: 'plane',
+      width: 75,
+      height: 75
+    },
+    rotation: {x: -90, y: 0, z: 0},
+    material: {
+      src: 'url(https://cdn.rawgit.com/donmccurdy/aframe-extras/v1.16.3/assets/grid.png)',
+      repeat: '75 75'
+    }
+  },
+  mappings: {
+    width: 'geometry.width',
+    depth: 'geometry.depth',
+    src: 'material.src'
+  }
+};
+
+},{}],40:[function(require,module,exports){
+/**
+ * Flat-shaded ocean primitive.
+ *
+ * Based on a Codrops tutorial:
+ * http://tympanus.net/codrops/2016/04/26/the-aviator-animating-basic-3d-scene-threejs/
+ */
+module.exports.Primitive = {
+  defaultAttributes: {
+    ocean: {},
+    rotation: {x: -90, y: 0, z: 0}
+  },
+  mappings: {
+    width: 'ocean.width',
+    depth: 'ocean.depth',
+    density: 'ocean.density',
+    color: 'ocean.color',
+    opacity: 'ocean.opacity'
+  }
+};
+
+module.exports.Component = {
+  schema: {
+    // Dimensions of the ocean area.
+    width: {default: 10, min: 0},
+    depth: {default: 10, min: 0},
+
+    // Density of waves.
+    density: {default: 10},
+
+    // Wave amplitude and variance.
+    amplitude: {default: 0.1},
+    amplitudeVariance: {default: 0.3},
+
+    // Wave speed and variance.
+    speed: {default: 1},
+    speedVariance: {default: 2},
+
+    // Material.
+    color: {default: 0x7AD2F7},
+    opacity: {default: 0.8}
+  },
+
+  init: function () {
+    var el = this.el,
+        data = this.data,
+        material = el.components.material;
+
+    var geometry = new THREE.PlaneGeometry(data.width, data.depth, data.density, data.density);
+    geometry.mergeVertices();
+    this.waves = [];
+    for (var v, i = 0, l = geometry.vertices.length; i < l; i++) {
+      v = geometry.vertices[i];
+      this.waves.push({
+        z: v.z,
+        ang: Math.random() * Math.PI * 2,
+        amp: data.amplitude + Math.random() * data.amplitudeVariance,
+        speed: (data.speed + Math.random() * data.speedVariance) / 1000 // radians / frame
+      });
+    }
+
+    if (!material) {
+      material = {};
+      material.material = new THREE.MeshPhongMaterial({
+        color: data.color,
+        transparent: data.opacity < 1,
+        opacity: data.opacity,
+        shading: THREE.FlatShading,
+      });
+    }
+
+    this.mesh = new THREE.Mesh(geometry, material.material);
+    el.object3D.add(this.mesh);
+  },
+
+  remove: function () {
+    this.el.object3D.remove(this.mesh);
+  },
+
+  tick: function (t, dt) {
+    if (isNaN(dt)) return;
+
+    var verts = this.mesh.geometry.vertices;
+    for (var v, vprops, i = 0; (v = verts[i]); i++){
+      vprops = this.waves[i];
+      v.z = vprops.z + Math.sin(vprops.ang) * vprops.amp;
+      vprops.ang += vprops.speed * dt;
+    }
+    this.mesh.geometry.verticesNeedUpdate = true;
+  }
+};
+
+},{}],41:[function(require,module,exports){
+/**
+ * Tube following a custom path.
+ *
+ * Usage:
+ *
+ * ```html
+ * <a-tube path="5 0 5, 5 0 -5, -5 0 -5" radius="0.5"></a-tube>
+ * ```
+ */
+module.exports.Primitive = {
+  defaultAttributes: {
+    tube:           {},
+  },
+  mappings: {
+    path:           'tube.path',
+    segments:       'tube.segments',
+    radius:         'tube.radius',
+    radialSegments: 'tube.radialSegments',
+    closed:         'tube.closed'
+  }
+};
+
+module.exports.Component = {
+  schema: {
+    path:           {default: []},
+    segments:       {default: 64},
+    radius:         {default: 1},
+    radialSegments: {default: 8},
+    closed:         {default: false}
+  },
+
+  init: function () {
+    var el = this.el,
+        data = this.data,
+        material = el.components.material;
+
+    if (!data.path.length) {
+      console.error('[a-tube] `path` property expected but not found.');
+      return;
+    }
+
+    var curve = new THREE.CatmullRomCurve3(data.path.map(function (point) {
+      point = point.split(' ');
+      return new THREE.Vector3(Number(point[0]), Number(point[1]), Number(point[2]));
+    }));
+    var geometry = new THREE.TubeGeometry(
+      curve, data.segments, data.radius, data.radialSegments, data.closed
+    );
+
+    if (!material) {
+      material = {};
+      material.material = new THREE.MeshPhongMaterial();
+    }
+
+    this.mesh = new THREE.Mesh(geometry, material.material);
+    this.el.setObject3D('mesh', this.mesh);
+  },
+
+  remove: function () {
+    if (this.mesh) this.el.removeObject3D('mesh');
+  }
+};
+
+},{}],42:[function(require,module,exports){
+module.exports = {
+  'a-grid':        require('./a-grid'),
+  'a-ocean':        require('./a-ocean'),
+  'a-tube':        require('./a-tube'),
+
+  registerAll: function (AFRAME) {
+    if (this._registered) return;
+
+    AFRAME = AFRAME || window.AFRAME;
+    AFRAME = AFRAME.aframeCore || AFRAME;
+
+    AFRAME.registerPrimitive('a-grid',  this['a-grid']);
+
+    AFRAME.registerComponent('ocean', this['a-ocean'].Component);
+    AFRAME.registerPrimitive('a-ocean', this['a-ocean'].Primitive);
+
+    AFRAME.registerComponent('tube', this['a-tube'].Component);
+    AFRAME.registerPrimitive('a-tube', this['a-tube'].Primitive);
+
+    this._registered = true;
+  }
+};
+
+},{"./a-grid":39,"./a-ocean":40,"./a-tube":41}],43:[function(require,module,exports){
+module.exports = {
+  'shadow':       require('./shadow'),
+  'shadow-light': require('./shadow-light'),
+
+  registerAll: function (AFRAME) {
+    if (this._registered) return;
+
+    AFRAME = AFRAME || window.AFRAME;
+    AFRAME = AFRAME.aframeCore || AFRAME;
+    if (!AFRAME.components['shadow'])       AFRAME.registerComponent('shadow',        this['shadow']);
+    if (!AFRAME.components['shadow-light']) AFRAME.registerComponent('shadow-light',  this['shadow-light']);
+
+    this._registered = true;
+  }
+};
+
+},{"./shadow":45,"./shadow-light":44}],44:[function(require,module,exports){
+/**
+ * Light component.
+ *
+ * Source: https://github.com/aframevr/aframe-core/pull/348
+ *
+ * @namespace light
+ * @param {number} [angle=PI / 3] - Maximum extent of light from its direction,
+          in radians. For spot lights.
+ * @param {bool} [castShadow=false] - Whether light will cast shadows.
+          Only applies to directional, point, and spot lights.
+ * @param {string} [color=#FFF] - Light color. For every light.
+ * @param {number} [decay=1] - Amount the light dims along the distance of the
+          light. For point and spot lights.
+ * @param {number} [exponent=10.0] - Rapidity of falloff of light from its
+          target direction. For spot lights.
+ * @param {string} [groundColor=#FFF] - Ground light color.
+          For hemisphere lights.
+ * @param {number} [intensity=1.0] - Light strength.
+          For every light except ambient.
+ * @param {number} [shadowBias=0] - How much to add or subtract from the
+          normalized depth when deciding whether a surface is in shadow.
+ * @param {number} [shadowCameraFar=5000] - Orthographic shadow camera frustum
+          parameter.
+ * @param {number} [shadowCameraNear=50] - Orthographic shadow camera frustum
+          parameter.
+ * @param {number} [shadowDarkness=0.5] - Darkness of shadow cast, from 0 to 1.
+ * @param {number} [shadowMapHeight=512] - Shadow map texture height in pixels.
+ * @param {number} [shadowMapWidth=512] - Shadow map texture height in pixels.
+ * @param {string} [type=directional] - Light type (i.e., ambient, directional,
+          hemisphere, point, spot).
+ */
+module.exports = {
+  schema: {
+      angle:            { default: Math.PI / 3 },
+      castShadow:       { default: false },
+      color:            { default: '#FFF' },
+      groundColor:      { default: '#FFF' },
+      decay:            { default: 1 },
+      distance:         { default: 0.0 },
+      exponent:         { default: 10.0 },
+      intensity:        { default: 1.0 },
+      shadowBias:       { default: 0 },
+      shadowCameraFar:  { default: 5000 },
+      shadowCameraFov:  { default: 50 },
+      shadowCameraNear: { default: 0.5 },
+      shadowDarkness:   { default: 0.5 },
+      shadowMapHeight:  { default: 512 },
+      shadowMapWidth:   { default: 512 },
+      type:             { default: 'directional' }
+  },
+
+  init: function () {
+    var el = this.el;
+    this.light = this.getLight();
+    el.object3D.add(this.light);
+    el.sceneEl.systems.light.registerLight(el);
+    if (!el.sceneEl.hasLoaded) {
+      el.sceneEl.addEventListener('loaded', this.play.bind(this));
+    }
+  },
+
+  update: function (previousData) {
+    if (!previousData) { return; }
+    this.el.object3D.remove(this.light);
+    this.light = this.getLight();
+    this.el.object3D.add(this.light);
+  },
+
+  play: function () {
+    var el = this.el,
+        renderer = el.sceneEl.renderer;
+    if (renderer && !renderer.shadowMap.enabled) {
+      renderer.shadowMap.enabled = true;
+    }
+  },
+
+  /**
+   * Creates a new three.js light object given the current attributes of the
+   * component.
+   *
+   * @namespace light
+   */
+  getLight: function () {
+    var data = this.data;
+    var color = new THREE.Color(data.color).getHex();
+    var intensity = data.intensity;
+    var type = data.type;
+
+    if (type) {
+      type = type.toLowerCase();
+    }
+    switch (type) {
+      case 'ambient': {
+        return new THREE.AmbientLight(color);
+      }
+      case 'directional': {
+        return this.setShadow(new THREE.DirectionalLight(color, intensity));
+      }
+      case 'hemisphere': {
+        return new THREE.HemisphereLight(color, data.groundColor,
+                                         intensity);
+      }
+      case 'point': {
+        return this.setShadow(
+          new THREE.PointLight(color, intensity, data.distance, data.decay));
+      }
+      case 'spot': {
+        return this.setShadow(
+          new THREE.SpotLight(color, intensity, data.distance, data.angle,
+                              data.exponent, data.decay));
+      }
+      default: {
+        return new THREE.AmbientLight(color);
+      }
+    }
+  },
+
+  /**
+   * Copy over shadow-related data from the component onto the light.
+   *
+   * @param {object} light
+   */
+  setShadow: function (light) {
+    var data = this.data;
+    if (!data.castShadow) { return light; }
+
+    light.castShadow = data.castShadow;
+    light.shadow.camera.near = data.shadowCameraNear;
+    light.shadow.camera.far = data.shadowCameraFar;
+    light.shadow.camera.fov = data.shadowCameraFov;
+    light.shadow.darkness = data.shadowDarkness;
+    light.shadow.mapSize.height = data.shadowMapHeight;
+    light.shadow.mapSize.width = data.shadowMapWidth;
+
+    return light;
+  }
+};
+
+},{}],45:[function(require,module,exports){
+/**
+ * Shadow component.
+ *
+ * Source: https://github.com/aframevr/aframe-core/pull/348
+ *
+ * @namespace shadow
+ * @param {bool} [cast=false] - whether object will cast shadows.
+ * @param {bool} [receive=false] - whether object will receive shadows.
+ */
+module.exports = {
+  schema: {
+    cast:     { default: false },
+    receive:  { default: false }
+  },
+
+  init: function () {
+    this.el.addEventListener('model-loaded', this.update.bind(this));
+  },
+
+  update: function () {
+    var data = this.data;
+
+    // Applied recursively to support imported models.
+    this.el.object3D.traverse(function(node) {
+      if (node instanceof THREE.Mesh) {
+        node.castShadow = data.cast;
+        node.receiveShadow = data.receive;
+      }
+    });
+  },
+
+  remove: function () {}
+};
+
+},{}],46:[function(require,module,exports){
 /*!
- * jQuery JavaScript Library v2.2.3
+ * jQuery JavaScript Library v2.2.4
  * http://jquery.com/
  *
  * Includes Sizzle.js
@@ -20487,7 +21136,7 @@ World.prototype.clearForces = function(){
  * Released under the MIT license
  * http://jquery.org/license
  *
- * Date: 2016-04-05T19:26Z
+ * Date: 2016-05-20T17:23Z
  */
 
 (function( global, factory ) {
@@ -20543,7 +21192,7 @@ var support = {};
 
 
 var
-	version = "2.2.3",
+	version = "2.2.4",
 
 	// Define a local copy of jQuery
 	jQuery = function( selector, context ) {
@@ -25484,13 +26133,14 @@ jQuery.Event.prototype = {
 	isDefaultPrevented: returnFalse,
 	isPropagationStopped: returnFalse,
 	isImmediatePropagationStopped: returnFalse,
+	isSimulated: false,
 
 	preventDefault: function() {
 		var e = this.originalEvent;
 
 		this.isDefaultPrevented = returnTrue;
 
-		if ( e ) {
+		if ( e && !this.isSimulated ) {
 			e.preventDefault();
 		}
 	},
@@ -25499,7 +26149,7 @@ jQuery.Event.prototype = {
 
 		this.isPropagationStopped = returnTrue;
 
-		if ( e ) {
+		if ( e && !this.isSimulated ) {
 			e.stopPropagation();
 		}
 	},
@@ -25508,7 +26158,7 @@ jQuery.Event.prototype = {
 
 		this.isImmediatePropagationStopped = returnTrue;
 
-		if ( e ) {
+		if ( e && !this.isSimulated ) {
 			e.stopImmediatePropagation();
 		}
 
@@ -26438,19 +27088,6 @@ function getWidthOrHeight( elem, name, extra ) {
 		val = name === "width" ? elem.offsetWidth : elem.offsetHeight,
 		styles = getStyles( elem ),
 		isBorderBox = jQuery.css( elem, "boxSizing", false, styles ) === "border-box";
-
-	// Support: IE11 only
-	// In IE 11 fullscreen elements inside of an iframe have
-	// 100x too small dimensions (gh-1764).
-	if ( document.msFullscreenElement && window.top !== window ) {
-
-		// Support: IE11 only
-		// Running getBoundingClientRect on a disconnected node
-		// in IE throws an error.
-		if ( elem.getClientRects().length ) {
-			val = Math.round( elem.getBoundingClientRect()[ name ] * 100 );
-		}
-	}
 
 	// Some non-html elements return undefined for offsetWidth, so check for null/undefined
 	// svg - https://bugzilla.mozilla.org/show_bug.cgi?id=649285
@@ -28342,6 +28979,7 @@ jQuery.extend( jQuery.event, {
 	},
 
 	// Piggyback on a donor event to simulate a different one
+	// Used only for `focus(in | out)` events
 	simulate: function( type, elem, event ) {
 		var e = jQuery.extend(
 			new jQuery.Event(),
@@ -28349,27 +28987,10 @@ jQuery.extend( jQuery.event, {
 			{
 				type: type,
 				isSimulated: true
-
-				// Previously, `originalEvent: {}` was set here, so stopPropagation call
-				// would not be triggered on donor event, since in our own
-				// jQuery.event.stopPropagation function we had a check for existence of
-				// originalEvent.stopPropagation method, so, consequently it would be a noop.
-				//
-				// But now, this "simulate" function is used only for events
-				// for which stopPropagation() is noop, so there is no need for that anymore.
-				//
-				// For the 1.x branch though, guard for "click" and "submit"
-				// events is still used, but was moved to jQuery.event.stopPropagation function
-				// because `originalEvent` should point to the original event for the constancy
-				// with other events and for more focused logic
 			}
 		);
 
 		jQuery.event.trigger( e, null, elem );
-
-		if ( e.isDefaultPrevented() ) {
-			event.preventDefault();
-		}
 	}
 
 } );
