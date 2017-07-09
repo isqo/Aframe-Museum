@@ -37,19 +37,20 @@ if you want to contribute to the project or to manipulate it, you should have th
 * [grunt](https://gruntjs.com/getting-started) the JavaScript Task Runner
 * [grunt-script-link-tags](https://www.npmjs.com/package/grunt-script-link-tags) - Auto-generate <script> and <link> tags for your HTML files.
 ### why npm ?
-To install the dependencies of the project which are listed in package.json, navigate to the project directory and run the following command :
+We use npm to install the dependencies of the project which are listed in package.json.</br>
+Navigate to the project directory and run the following command :
 ```
 npm install
 ```
 ### why browserify ?
-We use browserify to bundle up **maintobrowserify.js** (it contains some dependencies) into **bundle.js** which is included in index.html.
-run the following command from **js/** if you want to bundle up maintobrowserify.js:
+We use browserify to bundle up **maintobrowserify.js** (it contains some dependencies) into **bundle.js** which is included in index.html.</br>
+Run the following command from **js/** if you want to bundle up maintobrowserify.js:
 ```
 browserify maintobrowserify.js > bundle.js
 ``` 
 ### why grunt and grunt-script-link-tags?
 We use the plugin **grunt-script-link-tags** to add automatically script tags of all the javascript files located in **js/project** in 
-index.html.To run the plugin, you should have grunt installed.
+index.html.To run the plugin, you should have grunt installed.</brW
 If you want to update the tags, run the following command:
 ```
 grunt slt
