@@ -5,7 +5,7 @@ Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that p
   <img alt="A-Painter" target="_blank" src="https://user-images.githubusercontent.com/8776142/27985796-c5867608-63f2-11e7-9aab-a984da21bd83.png" height="190" width="32%">
 </a>
 
-<a href="https://user-images.githubusercontent.com/8776142/27986549-82d593a8-6400-11e7-983e-d716750ded9a.pn">
+<a href="https://user-images.githubusercontent.com/8776142/27986549-82d593a8-6400-11e7-983e-d716750ded9a.png">
   <img alt="A-Painter" target="_blank" src="https://user-images.githubusercontent.com/8776142/27986549-82d593a8-6400-11e7-983e-d716750ded9a.png" height="190" width="32%">
 </a>
 
