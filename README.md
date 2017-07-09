@@ -16,6 +16,7 @@ Aframe-Museum is A 3D Virtual Museum built using A-Frame; A web framework that p
 those screenshots have been taken on **mozilla Firefox**.
 ## How to visit the museum
 Actually, you can visit the museum only with the browser **mozilla firefox.**
+Navigate to the project directory and open index.html.
 
 ## Getting around
 
@@ -58,7 +59,7 @@ browserify maintobrowserify.js > bundle.js
 ``` 
 ### why grunt and grunt-script-link-tags?
 We use the plugin **grunt-script-link-tags** to add automatically script tags of all the javascript files located in **js/project** in 
-index.html.To run the plugin, you should have grunt installed.</brW
+index.html.To run the plugin, you should have grunt installed.</br>
 If you want to update the tags, run the following command:
 ```
 grunt slt
