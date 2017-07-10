@@ -57,8 +57,8 @@ Run the following command from **js/** if you want to bundle up maintobrowserify
 browserify maintobrowserify.js > bundle.js
 ``` 
 ### why grunt-script-link-tags?
-We use the plugin **grunt-script-link-tags** to add automatically script tags of all the javascript files located in **js/project** in 
-index.html.To run the plugin, you should have grunt installed.</br>
+We use the plugin **grunt-script-link-tags** to add automatically in 
+index.html the script tags of all the javascript files located in **js/project**.To run the plugin, you should have grunt installed.</br>
 If you want to update the tags, run the following command:
 ```
 grunt slt
