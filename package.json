@@ -17,6 +17,6 @@
   "homepage": "https://github.com/isqo",
   "dependencies": {
     "aframe-extras": "^1.14.0",
-	"jquery": "~2.2.3"
+    "jquery": "~3.0.0"
   }
 }
